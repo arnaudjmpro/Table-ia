@@ -25,6 +25,9 @@ const resultSection =
 const tableContainer =
     document.getElementById("tableContainer");
 
+const deleteTableButton =
+    document.getElementById("deleteTableButton");
+
 const insertExcelButton =
     document.getElementById("insertExcelButton");
 

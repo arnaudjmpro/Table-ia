@@ -4,8 +4,11 @@ const SUPABASE_FUNCTION_URL =
 const SUPABASE_PUBLISHABLE_KEY =
     "sb_publishable_LU68bB5ip1OEPr8DJnjJJg_G36GmXoY";
 
-const photoInput =
-    document.getElementById("photoInput");
+const cameraInput =
+    document.getElementById("cameraInput");
+
+const galleryInput =
+    document.getElementById("galleryInput");;
 
 const photoPreview =
     document.getElementById("photoPreview");

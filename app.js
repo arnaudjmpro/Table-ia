@@ -1,3 +1,9 @@
+const SUPABASE_FUNCTION_URL =
+    "https://ctihdqybwmymalpkjkov.supabase.co/functions/v1/tableia-ai";
+
+const SUPABASE_PUBLISHABLE_KEY =
+    "sb_publishable_LU68bB5ip1OEPr8DJnjJJg_G36GmXoY";
+
 const photoInput =
     document.getElementById("photoInput");
 

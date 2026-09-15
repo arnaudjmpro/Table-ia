@@ -336,6 +336,8 @@ function displayAiTable(data) {
         );
     }
 
+    currentTableData = data;
+    
     const table =
         document.createElement("table");
 

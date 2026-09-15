@@ -25,6 +25,9 @@ const resultSection =
 const tableContainer =
     document.getElementById("tableContainer");
 
+const modifyTableButton =
+    document.getElementById("modifyTableButton");
+
 const deleteTableButton =
     document.getElementById("deleteTableButton");
 

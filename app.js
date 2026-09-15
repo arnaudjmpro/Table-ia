@@ -107,7 +107,92 @@ deleteTableButton.addEventListener(
             "🗑 Tableau supprimé.";
     }
 );
+modifyTableButton.addEventListener(
+    "click",
+    async function () {
 
+        if (!currentTableData) {
+            statusText.textContent =
+                "Aucun tableau à modifier.";
+            return;
+        }
+
+        const instruction =
+            window.prompt(
+                "Quelle modification veux-tu apporter au tableau ?"
+            );
+
+        if (!instruction) {
+            return;
+        }
+
+        modifyTableButton.disabled =
+            true;
+
+        statusText.textContent =
+            "✨ Modification du tableau par l'IA...";
+
+        try {
+
+            const response =
+                await fetch(
+                    SUPABASE_FUNCTION_URL,
+                    {
+                        method: "POST",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json",
+
+                            "apikey":
+                                SUPABASE_PUBLISHABLE_KEY,
+
+                            "Authorization":
+                                `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
+                        },
+
+                        body: JSON.stringify({
+                            prompt:
+                                "Modifie ce tableau existant selon la demande de l'utilisateur. " +
+                                "Conserve toutes les données qui ne sont pas concernées. " +
+                                "Retourne le tableau complet au format TableIA.\n\n" +
+                                "TABLEAU ACTUEL :\n" +
+                                JSON.stringify(currentTableData) +
+                                "\n\nMODIFICATION DEMANDÉE :\n" +
+                                instruction
+                        })
+                    }
+                );
+
+            const responseText =
+                await response.text();
+
+            if (!response.ok) {
+                throw new Error(
+                    responseText
+                );
+            }
+
+            const data =
+                JSON.parse(responseText);
+
+            displayAiTable(data);
+
+            statusText.textContent =
+                "✅ Tableau modifié avec succès.";
+
+        } catch (error) {
+
+            console.error(error);
+
+            statusText.textContent =
+                "❌ Impossible de modifier le tableau.";
+        }
+
+        modifyTableButton.disabled =
+            false;
+    }
+);
 // ==========================================
 // ANALYSE
 // ==========================================

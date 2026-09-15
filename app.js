@@ -195,6 +195,101 @@ modifyTableButton.addEventListener(
             false;
     }
 );
+
+// ==========================================
+// INSERTION DANS EXCEL
+// ==========================================
+
+insertExcelButton.addEventListener(
+    "click",
+    async function () {
+
+        if (!currentTableData) {
+            statusText.textContent =
+                "Aucun tableau à insérer.";
+            return;
+        }
+
+        if (typeof Excel === "undefined") {
+            statusText.textContent =
+                "📊 TableIA doit être ouvert depuis Excel pour insérer le tableau.";
+            return;
+        }
+
+        insertExcelButton.disabled =
+            true;
+
+        statusText.textContent =
+            "📊 Insertion du tableau dans Excel...";
+
+        try {
+
+            await Excel.run(
+                async function (context) {
+
+                    const sheet =
+                        context.workbook.worksheets
+                            .getActiveWorksheet();
+
+                    const headers =
+                        currentTableData.columns.map(
+                            function (column) {
+                                return column.name || "";
+                            }
+                        );
+
+                    const rows =
+                        Array.isArray(currentTableData.rows)
+                            ? currentTableData.rows
+                            : [];
+
+                    const values = [
+                        headers,
+                        ...rows.map(
+                            function (row) {
+                                return headers.map(
+                                    function (_, index) {
+                                        return row[index] ?? "";
+                                    }
+                                );
+                            }
+                        )
+                    ];
+
+                    const range =
+                        sheet.getRangeByIndexes(
+                            0,
+                            0,
+                            values.length,
+                            headers.length
+                        );
+
+                    range.values =
+                        values;
+
+                    range.format.autofitColumns();
+                    range.format.autofitRows();
+
+                    await context.sync();
+                }
+            );
+
+            statusText.textContent =
+                "✅ Tableau inséré dans Excel.";
+
+        } catch (error) {
+
+            console.error(error);
+
+            statusText.textContent =
+                "❌ Impossible d'insérer le tableau dans Excel.";
+        }
+
+        insertExcelButton.disabled =
+            false;
+    }
+);
+
 // ==========================================
 // ANALYSE
 // ==========================================

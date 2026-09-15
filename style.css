@@ -1,0 +1,130 @@
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #f4f6f8;
+    color: #1f2937;
+}
+
+.app {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 16px 40px;
+}
+
+.header {
+    text-align: center;
+    margin-bottom: 24px;
+}
+
+.header h1 {
+    margin: 0;
+    font-size: 32px;
+}
+
+.header p {
+    margin-top: 8px;
+    color: #6b7280;
+}
+
+.card {
+    background: white;
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+.card h2 {
+    margin-top: 0;
+}
+
+.description {
+    color: #6b7280;
+    line-height: 1.5;
+}
+
+#photoInput {
+    display: none;
+}
+
+.photo-button,
+button {
+    display: block;
+    width: 100%;
+    border: none;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-top: 14px;
+    font-size: 15px;
+    font-weight: bold;
+    text-align: center;
+    cursor: pointer;
+}
+
+.photo-button {
+    background: #e8eef7;
+    color: #1f2937;
+}
+
+button {
+    background: #2563eb;
+    color: white;
+}
+
+button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+button:active,
+.photo-button:active {
+    transform: scale(0.97);
+}
+
+.photo-preview {
+    display: none;
+    width: 100%;
+    max-height: 360px;
+    object-fit: contain;
+    margin-top: 16px;
+    border-radius: 12px;
+    border: 1px solid #d1d5db;
+}
+
+.status {
+    text-align: center;
+    margin-top: 14px;
+    font-weight: bold;
+}
+
+.result-section {
+    display: none;
+}
+
+.table-container {
+    overflow-x: auto;
+    margin-top: 16px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+}
+
+th,
+td {
+    border: 1px solid #333333;
+    padding: 10px;
+    text-align: left;
+    white-space: nowrap;
+}
+
+th {
+    background: #eef2f7;
+    font-weight: bold;
+  }

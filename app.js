@@ -36,6 +36,7 @@ const insertExcelButton =
 
 
 let selectedPhoto = null;
+let currentTableData = null;
 
 
 // ==========================================

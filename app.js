@@ -96,7 +96,9 @@ deleteTableButton.addEventListener(
 
         tableContainer.innerHTML =
             "";
-
+        
+currentTableData = null;
+        
         resultSection.style.display =
             "none";
 

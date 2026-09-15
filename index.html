@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>TableIA Excel</title>
+
+    <link
+        rel="stylesheet"
+        href="style.css"
+    >
+</head>
+
+<body>
+
+    <main class="app">
+
+        <header class="header">
+
+            <h1>TableIA</h1>
+
+            <p>
+                Transformez une photo brute
+                en tableau Excel structuré.
+            </p>
+
+        </header>
+
+
+        <section class="card">
+
+            <h2>
+                📷 Importer un document
+            </h2>
+
+            <p class="description">
+                Photographiez ou sélectionnez
+                une feuille contenant vos données.
+            </p>
+
+
+            <label
+                for="photoInput"
+                class="photo-button"
+            >
+                📷 CHOISIR UNE PHOTO
+            </label>
+
+            <input
+                id="photoInput"
+                type="file"
+                accept="image/*"
+                capture="environment"
+            >
+
+
+            <img
+                id="photoPreview"
+                class="photo-preview"
+                alt="Aperçu du document"
+            >
+
+
+            <button
+                id="analyzeButton"
+                type="button"
+                disabled
+            >
+                ✨ ANALYSER AVEC L'IA
+            </button>
+
+
+            <p
+                id="status"
+                class="status"
+            ></p>
+
+        </section>
+
+
+        <section
+            id="resultSection"
+            class="card result-section"
+        >
+
+            <h2>
+                Tableau détecté
+            </h2>
+
+            <div
+                id="tableContainer"
+                class="table-container"
+            ></div>
+
+            <button
+                id="insertExcelButton"
+                type="button"
+                disabled
+            >
+                📊 INSÉRER DANS EXCEL
+            </button>
+
+        </section>
+
+    </main>
+
+
+    <script src="app.js"></script>
+
+</body>
+  </html>

@@ -95,18 +95,59 @@ analyzeButton.addEventListener(
                 );
 
             statusText.textContent =
-                "✅ Photo prête pour l'analyse IA.";
+    "✨ Analyse de la photo par l'IA...";
 
-            /*
-                L'étape suivante connectera ici
-                notre fonction Supabase TableIA.
-            */
+const response =
+    await fetch(
+        SUPABASE_FUNCTION_URL,
+        {
+            method: "POST",
 
-            console.log(
-                "Image prête :",
-                imageBase64.length,
-                "caractères"
-            );
+            headers: {
+                "Content-Type":
+                    "application/json",
+
+                "apikey":
+                    SUPABASE_PUBLISHABLE_KEY,
+
+                "Authorization":
+                    `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
+            },
+
+            body: JSON.stringify({
+                prompt:
+                    "Analyse cette image et transforme les informations visibles en un tableau TableIA structuré.",
+
+                imageBase64:
+                    imageBase64,
+
+                imageMimeType:
+                    "image/jpeg"
+            })
+        }
+    );
+
+const responseText =
+    await response.text();
+
+if (!response.ok) {
+
+    throw new Error(
+        `Erreur ${response.status} : ${responseText}`
+    );
+}
+
+const data =
+    JSON.parse(
+        responseText
+    );
+
+displayAiTable(
+    data
+);
+
+statusText.textContent =
+    "✅ Photo analysée — tableau généré.";
 
         } catch (error) {
 

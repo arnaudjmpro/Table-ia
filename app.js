@@ -36,34 +36,50 @@ let selectedPhoto = null;
 // PHOTO
 // ==========================================
 
-photoInput.addEventListener(
+function handleSelectedPhoto(file) {
+
+    if (!file) {
+        return;
+    }
+
+    selectedPhoto =
+        file;
+
+    const imageUrl =
+        URL.createObjectURL(file);
+
+    photoPreview.src =
+        imageUrl;
+
+    photoPreview.style.display =
+        "block";
+
+    analyzeButton.disabled =
+        false;
+
+    statusText.textContent =
+        "📷 Photo prise en compte. Prête pour l'analyse.";
+}
+
+
+cameraInput.addEventListener(
     "change",
     function () {
 
-        const file =
-            photoInput.files[0];
+        handleSelectedPhoto(
+            cameraInput.files[0]
+        );
+    }
+);
 
-        if (!file) {
-            return;
-        }
 
-        selectedPhoto =
-            file;
+galleryInput.addEventListener(
+    "change",
+    function () {
 
-        const imageUrl =
-            URL.createObjectURL(file);
-
-        photoPreview.src =
-            imageUrl;
-
-        photoPreview.style.display =
-            "block";
-
-        analyzeButton.disabled =
-            false;
-
-        statusText.textContent =
-            "📷 Photo prise en compte. Prête pour l'analyse.";
+        handleSelectedPhoto(
+            galleryInput.files[0]
+        );
     }
 );
 

@@ -86,6 +86,23 @@ galleryInput.addEventListener(
     }
 );
 
+deleteTableButton.addEventListener(
+    "click",
+    function () {
+
+        tableContainer.innerHTML =
+            "";
+
+        resultSection.style.display =
+            "none";
+
+        insertExcelButton.disabled =
+            true;
+
+        statusText.textContent =
+            "🗑 Tableau supprimé.";
+    }
+);
 
 // ==========================================
 // ANALYSE

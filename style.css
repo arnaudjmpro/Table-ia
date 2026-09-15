@@ -47,7 +47,8 @@ body {
     line-height: 1.5;
 }
 
-#photoInput {
+#cameraInput,
+#galleryInput {
     display: none;
 }
 

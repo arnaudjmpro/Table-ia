@@ -237,3 +237,82 @@ function prepareImage(
         }
     );
               }
+// ==========================================
+// AFFICHAGE TABLEAU IA
+// ==========================================
+
+function displayAiTable(data) {
+
+    if (
+        !data ||
+        !Array.isArray(data.columns)
+    ) {
+        throw new Error(
+            "Réponse IA invalide."
+        );
+    }
+
+    const table =
+        document.createElement("table");
+
+    const headerRow =
+        document.createElement("tr");
+
+    data.columns.forEach(
+        function (column) {
+
+            const th =
+                document.createElement("th");
+
+            th.textContent =
+                column.name || "";
+
+            headerRow.appendChild(th);
+        }
+    );
+
+    table.appendChild(headerRow);
+
+
+    const rows =
+        Array.isArray(data.rows)
+            ? data.rows
+            : [];
+
+    rows.forEach(
+        function (row) {
+
+            const tr =
+                document.createElement("tr");
+
+            data.columns.forEach(
+                function (_, index) {
+
+                    const td =
+                        document.createElement("td");
+
+                    td.textContent =
+                        row[index] ?? "";
+
+                    tr.appendChild(td);
+                }
+            );
+
+            table.appendChild(tr);
+        }
+    );
+
+
+    tableContainer.innerHTML =
+        "";
+
+    tableContainer.appendChild(
+        table
+    );
+
+    resultSection.style.display =
+        "block";
+
+    insertExcelButton.disabled =
+        false;
+        }

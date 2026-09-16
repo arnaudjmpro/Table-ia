@@ -161,6 +161,13 @@ if (SpeechRecognition) {
         const prompt =
             textPrompt.value.trim();
 
+if (currentTableData) {
+
+    modifyTableButton.click();
+
+    return;
+}
+        
         if (!prompt && !selectedPhoto) {
             statusText.textContent =
                 "Écris, dicte ou ajoute une photo.";

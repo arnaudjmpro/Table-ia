@@ -209,6 +209,18 @@ textAnalyzeButton.addEventListener(
     }
 );
 
+clearPromptButton.addEventListener(
+    "click",
+    function () {
+
+        textPrompt.value =
+            "";
+
+        statusText.textContent =
+            "🧹 Demande effacée.";
+    }
+);
+
 // ==========================================
 // PHOTO
 // ==========================================

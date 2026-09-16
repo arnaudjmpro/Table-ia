@@ -129,3 +129,14 @@ th {
     background: #eef2f7;
     font-weight: bold;
   }
+
+#textPrompt {
+    width: 100%;
+    min-height: 130px;
+    padding: 14px;
+    border: 1px solid #d1d5db;
+    border-radius: 12px;
+    font-size: 16px;
+    font-family: Arial, sans-serif;
+    resize: vertical;
+}

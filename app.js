@@ -284,6 +284,8 @@ deleteTableButton.addEventListener(
             "";
         
 currentTableData = null;
+previousTableData =
+    null;
         
         resultSection.style.display =
             "none";

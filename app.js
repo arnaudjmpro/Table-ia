@@ -116,6 +116,8 @@ if (SpeechRecognition) {
                 currentText
                     ? currentText + " " + transcript
                     : transcript;
+            clearPromptButton.style.display =
+    "block";
         }
     );
 

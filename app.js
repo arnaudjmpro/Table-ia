@@ -49,6 +49,19 @@ const deleteTableButton =
 const insertExcelButton =
     document.getElementById("insertExcelButton");
 
+clearPromptButton.style.display =
+    "none";
+
+textPrompt.addEventListener(
+    "input",
+    function () {
+
+        clearPromptButton.style.display =
+            textPrompt.value.trim()
+                ? "block"
+                : "none";
+    }
+);
 
 let selectedPhoto = null;
 let currentTableData = null;
@@ -138,19 +151,6 @@ if (SpeechRecognition) {
 // ==========================================
 // CREATION PAR TEXTE
 // ==========================================
-
-textAnalyzeButton.addEventListener(
-    "click",
-    async function () {
-
-        const prompt =
-            textPrompt.value.trim();
-
-        if (!prompt) {
-            statusText.textContent =
-                "Écris ou dicte d'abord ta demande.";
-            return;
-        }
 
         textAnalyzeButton.addEventListener(
     "click",
@@ -264,6 +264,9 @@ clearPromptButton.addEventListener(
         textPrompt.value =
             "";
 
+clearPromptButton.style.display =
+    "none";
+        
         statusText.textContent =
             "🧹 Demande effacée.";
     }

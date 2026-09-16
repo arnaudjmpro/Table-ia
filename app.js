@@ -34,9 +34,6 @@ const resultSection =
 const tableContainer =
     document.getElementById("tableContainer");
 
-const modifyTableButton =
-    document.getElementById("modifyTableButton");
-
 const undoTableButton =
     document.getElementById("undoTableButton");
 
@@ -160,7 +157,7 @@ if (SpeechRecognition) {
 
 if (currentTableData) {
 
-    modifyTableButton.click();
+    await modifyCurrentTable();
 
     return;
 }
@@ -349,9 +346,7 @@ previousTableData =
             "🗑 Tableau supprimé.";
     }
 );
-modifyTableButton.addEventListener(
-    "click",
-    async function () {
+async function modifyCurrentTable() {
 
         if (!currentTableData) {
             statusText.textContent =
@@ -373,8 +368,8 @@ if (!instruction) {
     return;
 }
 
-        modifyTableButton.disabled =
-            true;
+        textAnalyzeButton.disabled =
+    true;
 
         statusText.textContent =
             "✨ Modification du tableau par l'IA...";
@@ -436,10 +431,10 @@ if (!instruction) {
                 "❌ Impossible de modifier le tableau.";
         }
 
-        modifyTableButton.disabled =
-            false;
+textAnalyzeButton.disabled =
+    false;
+    
     }
-);
 
 undoTableButton.addEventListener(
     "click",

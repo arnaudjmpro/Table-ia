@@ -47,6 +47,86 @@ const insertExcelButton =
 let selectedPhoto = null;
 let currentTableData = null;
 
+// ==========================================
+// DICTÉE VOCALE
+// ==========================================
+
+const SpeechRecognition =
+    window.SpeechRecognition ||
+    window.webkitSpeechRecognition;
+
+if (SpeechRecognition) {
+
+    const recognition =
+        new SpeechRecognition();
+
+    recognition.lang =
+        "fr-FR";
+
+    recognition.interimResults =
+        false;
+
+    recognition.continuous =
+        false;
+
+
+    voiceButton.addEventListener(
+        "click",
+        function () {
+
+            voiceButton.textContent =
+                "🎙 ÉCOUTE EN COURS...";
+
+            recognition.start();
+        }
+    );
+
+
+    recognition.addEventListener(
+        "result",
+        function (event) {
+
+            const transcript =
+                event.results[0][0].transcript;
+
+            const currentText =
+                textPrompt.value.trim();
+
+            textPrompt.value =
+                currentText
+                    ? currentText + " " + transcript
+                    : transcript;
+        }
+    );
+
+
+    recognition.addEventListener(
+        "end",
+        function () {
+
+            voiceButton.textContent =
+                "🎙 DICTER MA DEMANDE";
+        }
+    );
+
+
+    recognition.addEventListener(
+        "error",
+        function () {
+
+            voiceButton.textContent =
+                "🎙 DICTER MA DEMANDE";
+        }
+    );
+
+} else {
+
+    voiceButton.disabled =
+        true;
+
+    voiceButton.textContent =
+        "🎙 VOIX NON DISPONIBLE";
+}
 
 // ==========================================
 // PHOTO

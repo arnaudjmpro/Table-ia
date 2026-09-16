@@ -340,6 +340,8 @@ deleteTableButton.addEventListener(
             "";
         
 currentTableData = null;
+        textAnalyzeButton.textContent =
+    "✨ CRÉER LE TABLEAU";
 previousTableData =
     null;
         
@@ -795,6 +797,8 @@ function displayAiTable(data) {
     }
 
     currentTableData = data;
+    textAnalyzeButton.textContent =
+    "✨ MODIFIER LE TABLEAU";
     
     const table =
         document.createElement("table");

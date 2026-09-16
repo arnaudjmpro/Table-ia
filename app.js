@@ -305,6 +305,11 @@ modifyTableButton.addEventListener(
             return;
         }
 
+previousTableData =
+    JSON.parse(
+        JSON.stringify(currentTableData)
+    );
+        
         const instruction =
             window.prompt(
                 "Quelle modification veux-tu apporter au tableau ?"

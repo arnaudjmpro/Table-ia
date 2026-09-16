@@ -387,6 +387,33 @@ previousTableData =
     }
 );
 
+undoTableButton.addEventListener(
+    "click",
+    function () {
+
+        if (!previousTableData) {
+            statusText.textContent =
+                "Aucune modification à annuler.";
+            return;
+        }
+
+        currentTableData =
+            JSON.parse(
+                JSON.stringify(previousTableData)
+            );
+
+        displayAiTable(
+            currentTableData
+        );
+
+        previousTableData =
+            null;
+
+        statusText.textContent =
+            "↩ Dernière modification annulée.";
+    }
+);
+
 // ==========================================
 // INSERTION DANS EXCEL
 // ==========================================

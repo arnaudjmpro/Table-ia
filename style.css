@@ -72,7 +72,7 @@ button {
 }
 
 button {
-    background: #2563eb;
+    background: #107C41;
     color: white;
 }
 
@@ -139,4 +139,12 @@ th {
     font-size: 16px;
     font-family: Arial, sans-serif;
     resize: vertical;
+}
+
+#deleteTableButton {
+    background: #c62828;
+}
+
+#undoTableButton {
+    background: #6b7280;
 }

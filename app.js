@@ -272,6 +272,18 @@ clearPromptButton.style.display =
         
         statusText.textContent =
             "🧹 Demande effacée.";
+        setTimeout(
+    function () {
+        if (
+            statusText.textContent ===
+            "🧹 Demande effacée."
+        ) {
+            statusText.textContent =
+                "";
+        }
+    },
+    2000
+);
     }
 );
 

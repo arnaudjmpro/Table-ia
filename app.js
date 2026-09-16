@@ -25,9 +25,6 @@ const galleryInput =
 const photoPreview =
     document.getElementById("photoPreview");
 
-const analyzeButton =
-    document.getElementById("analyzeButton");
-
 const statusText =
     document.getElementById("status");
 
@@ -303,9 +300,6 @@ function handleSelectedPhoto(file) {
     photoPreview.style.display =
         "block";
 
-    analyzeButton.disabled =
-        false;
-
     statusText.textContent =
         "📷 Photo prise en compte. Prête pour l'analyse.";
 }
@@ -564,105 +558,6 @@ insertExcelButton.addEventListener(
         }
 
         insertExcelButton.disabled =
-            false;
-    }
-);
-
-// ==========================================
-// ANALYSE
-// ==========================================
-
-analyzeButton.addEventListener(
-    "click",
-    async function () {
-
-        if (!selectedPhoto) {
-
-            statusText.textContent =
-                "Veuillez sélectionner une photo.";
-
-            return;
-        }
-
-        analyzeButton.disabled =
-            true;
-
-        statusText.textContent =
-            "✨ Préparation de la photo...";
-
-        try {
-
-            const imageBase64 =
-                await prepareImage(
-                    selectedPhoto
-                );
-
-            statusText.textContent =
-    "✨ Analyse de la photo par l'IA...";
-
-const response =
-    await fetch(
-        SUPABASE_FUNCTION_URL,
-        {
-            method: "POST",
-
-            headers: {
-                "Content-Type":
-                    "application/json",
-
-                "apikey":
-                    SUPABASE_PUBLISHABLE_KEY,
-
-                "Authorization":
-                    `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
-            },
-
-            body: JSON.stringify({
-                prompt:
-                    "Analyse cette image et transforme les informations visibles en un tableau TableIA structuré.",
-
-                imageBase64:
-                    imageBase64,
-
-                imageMimeType:
-                    "image/jpeg"
-            })
-        }
-    );
-
-const responseText =
-    await response.text();
-
-if (!response.ok) {
-
-    throw new Error(
-        `Erreur ${response.status} : ${responseText}`
-    );
-}
-
-const data =
-    JSON.parse(
-        responseText
-    );
-
-displayAiTable(
-    data
-);
-
-statusText.textContent =
-    "✅ Photo analysée — tableau généré.";
-
-        } catch (error) {
-
-            console.error(
-                error
-            );
-
-            statusText.textContent =
-                "❌ Impossible de préparer la photo.";
-        }
-
-        analyzeButton.disabled =
             false;
     }
 );

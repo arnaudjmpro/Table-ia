@@ -13,6 +13,9 @@ const voiceButton =
 const textAnalyzeButton =
     document.getElementById("textAnalyzeButton");
 
+const clearPromptButton =
+    document.getElementById("clearPromptButton");
+
 const cameraInput =
     document.getElementById("cameraInput");
 

@@ -40,6 +40,9 @@ const tableContainer =
 const modifyTableButton =
     document.getElementById("modifyTableButton");
 
+const undoTableButton =
+    document.getElementById("undoTableButton");
+
 const deleteTableButton =
     document.getElementById("deleteTableButton");
 
@@ -49,6 +52,7 @@ const insertExcelButton =
 
 let selectedPhoto = null;
 let currentTableData = null;
+let previousTableData = null;
 
 // ==========================================
 // DICTÉE VOCALE

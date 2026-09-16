@@ -4,6 +4,15 @@ const SUPABASE_FUNCTION_URL =
 const SUPABASE_PUBLISHABLE_KEY =
     "sb_publishable_LU68bB5ip1OEPr8DJnjJJg_G36GmXoY";
 
+const textPrompt =
+    document.getElementById("textPrompt");
+
+const voiceButton =
+    document.getElementById("voiceButton");
+
+const textAnalyzeButton =
+    document.getElementById("textAnalyzeButton");
+
 const cameraInput =
     document.getElementById("cameraInput");
 

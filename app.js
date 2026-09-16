@@ -129,6 +129,84 @@ if (SpeechRecognition) {
 }
 
 // ==========================================
+// CREATION PAR TEXTE
+// ==========================================
+
+textAnalyzeButton.addEventListener(
+    "click",
+    async function () {
+
+        const prompt =
+            textPrompt.value.trim();
+
+        if (!prompt) {
+            statusText.textContent =
+                "Écris ou dicte d'abord ta demande.";
+            return;
+        }
+
+        textAnalyzeButton.disabled =
+            true;
+
+        statusText.textContent =
+            "✨ Création du tableau par l'IA...";
+
+        try {
+
+            const response =
+                await fetch(
+                    SUPABASE_FUNCTION_URL,
+                    {
+                        method: "POST",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json",
+
+                            "apikey":
+                                SUPABASE_PUBLISHABLE_KEY,
+
+                            "Authorization":
+                                `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
+                        },
+
+                        body: JSON.stringify({
+                            prompt: prompt
+                        })
+                    }
+                );
+
+            const responseText =
+                await response.text();
+
+            if (!response.ok) {
+                throw new Error(
+                    responseText
+                );
+            }
+
+            const data =
+                JSON.parse(responseText);
+
+            displayAiTable(data);
+
+            statusText.textContent =
+                "✅ Tableau généré avec succès.";
+
+        } catch (error) {
+
+            console.error(error);
+
+            statusText.textContent =
+                "❌ Impossible de générer le tableau.";
+        }
+
+        textAnalyzeButton.disabled =
+            false;
+    }
+);
+
+// ==========================================
 // PHOTO
 // ==========================================
 

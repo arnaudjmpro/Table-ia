@@ -64,19 +64,104 @@
     🧹 EFFACER LA DEMANDE
     </button>
 
-</section>
-        
-        <section class="card">
+<section class="card">
 
-            <h2>
-                📷 Importer un document
-            </h2>
+    <h2>
+        ✨ Créer ou modifier un tableau
+    </h2>
 
-            <p class="description">
-                Photographiez ou sélectionnez
-                une feuille contenant vos données.
-            </p>
+    <textarea
+        id="textPrompt"
+        rows="5"
+        placeholder="Écrivez ou dictez votre demande..."
+    ></textarea>
 
+
+    <label
+        for="cameraInput"
+        class="photo-button"
+    >
+        📷 PRENDRE UNE PHOTO
+    </label>
+
+    <input
+        id="cameraInput"
+        type="file"
+        accept="image/*"
+        capture="environment"
+    >
+
+
+    <label
+        for="galleryInput"
+        class="photo-button"
+    >
+        🖼 CHOISIR DANS LA GALERIE
+    </label>
+
+    <input
+        id="galleryInput"
+        type="file"
+        accept="image/*"
+    >
+
+
+    <img
+        id="photoPreview"
+        class="photo-preview"
+        alt="Aperçu du document"
+    >
+
+
+    <button
+        id="voiceButton"
+        type="button"
+    >
+        🎙 DICTER MA DEMANDE
+    </button>
+
+
+    <button
+        id="textAnalyzeButton"
+        type="button"
+    >
+        ✨ CRÉER LE TABLEAU
+    </button>
+
+
+    <button
+        id="clearPromptButton"
+        type="button"
+    >
+        🧹 EFFACER LA DEMANDE
+    </button>
+
+
+    <button
+        id="modifyTableButton"
+        type="button"
+    >
+        ✨ MODIFIER LE TABLEAU
+    </button>
+
+
+    <!-- Conservé temporairement pour ne pas casser le JS -->
+    <button
+        id="analyzeButton"
+        type="button"
+        style="display:none;"
+        disabled
+    >
+        ANALYSER
+    </button>
+
+
+    <p
+        id="status"
+        class="status"
+    ></p>
+
+        </section>
 
             <label
     for="cameraInput"
@@ -144,13 +229,6 @@
                 id="tableContainer"
                 class="table-container"
             ></div>
-
-    <button
-    id="modifyTableButton"
-    type="button"
->
-    ✨ MODIFIER LE TABLEAU AVEC L'IA
-</button>
 
 <button
     id="undoTableButton"

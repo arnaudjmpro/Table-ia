@@ -362,13 +362,13 @@ previousTableData =
     );
         
         const instruction =
-            window.prompt(
-                "Quelle modification veux-tu apporter au tableau ?"
-            );
+    textPrompt.value.trim();
 
-        if (!instruction) {
-            return;
-        }
+if (!instruction) {
+    statusText.textContent =
+        "Écris ou dicte la modification à apporter.";
+    return;
+}
 
         modifyTableButton.disabled =
             true;

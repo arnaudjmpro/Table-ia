@@ -152,13 +152,54 @@ textAnalyzeButton.addEventListener(
             return;
         }
 
+        textAnalyzeButton.addEventListener(
+    "click",
+    async function () {
+
+        const prompt =
+            textPrompt.value.trim();
+
+        if (!prompt && !selectedPhoto) {
+            statusText.textContent =
+                "Écris, dicte ou ajoute une photo.";
+            return;
+        }
+
         textAnalyzeButton.disabled =
             true;
 
         statusText.textContent =
-            "✨ Création du tableau par l'IA...";
+            selectedPhoto
+                ? "✨ Analyse du document par l'IA..."
+                : "✨ Création du tableau par l'IA...";
 
         try {
+
+            const body = {};
+
+            if (prompt) {
+                body.prompt =
+                    prompt;
+            }
+
+            if (selectedPhoto) {
+
+                const imageBase64 =
+                    await prepareImage(
+                        selectedPhoto
+                    );
+
+                body.imageBase64 =
+                    imageBase64;
+
+                body.imageMimeType =
+                    "image/jpeg";
+
+                if (!prompt) {
+                    body.prompt =
+                        "Analyse ce document et transforme les informations visibles en tableau TableIA structuré.";
+                }
+            }
 
             const response =
                 await fetch(
@@ -177,9 +218,8 @@ textAnalyzeButton.addEventListener(
                                 `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
                         },
 
-                        body: JSON.stringify({
-                            prompt: prompt
-                        })
+                        body:
+                            JSON.stringify(body)
                     }
                 );
 
@@ -193,9 +233,13 @@ textAnalyzeButton.addEventListener(
             }
 
             const data =
-                JSON.parse(responseText);
+                JSON.parse(
+                    responseText
+                );
 
-            displayAiTable(data);
+            displayAiTable(
+                data
+            );
 
             statusText.textContent =
                 "✅ Tableau généré avec succès.";

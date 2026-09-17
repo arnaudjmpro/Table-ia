@@ -157,7 +157,8 @@ voiceButton.addEventListener(
                 "🎙 DICTER MA DEMANDE";
 
             statusText.textContent =
-                "❌ Autorisation du microphone impossible.";
+    "❌ Micro : " +
+    (error?.message || error?.name || "erreur inconnue");
         }
     }
 );

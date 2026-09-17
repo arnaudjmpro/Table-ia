@@ -120,21 +120,32 @@ voiceButton.addEventListener(
                 Office.devicePermission
             ) {
 
-                const permissionGrantedNow =
-                    await Office.devicePermission
-                        .requestPermissions([
-                            Office.DevicePermissionType.microphone
-                        ]);
+                try {
 
-                if (permissionGrantedNow) {
+    const permissionGrantedNow =
+        await Office.devicePermission
+            .requestPermissions([
+                Office.DevicePermissionType.microphone
+            ]);
 
-                    statusText.textContent =
-                        "🎙 Micro autorisé. Rechargement de TableIA...";
+    if (permissionGrantedNow) {
 
-                    window.location.reload();
+        statusText.textContent =
+            "🎙 Micro autorisé. Rechargement de TableIA...";
 
-                    return;
-                }
+        window.location.reload();
+
+        return;
+    }
+
+} catch (permissionError) {
+
+    console.warn(
+        "Office devicePermission indisponible. Essai direct du micro.",
+        permissionError
+    );
+}
+
             }
 
 

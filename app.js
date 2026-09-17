@@ -83,16 +83,84 @@ if (SpeechRecognition) {
         false;
 
 
-    voiceButton.addEventListener(
-        "click",
-        function () {
+    let isListening =
+    false;
+
+voiceButton.addEventListener(
+    "click",
+    async function () {
+
+        if (isListening) {
+
+            try {
+                recognition.stop();
+            } catch (error) {
+                console.log(
+                    "Reconnaissance déjà arrêtée"
+                );
+            }
+
+            isListening =
+                false;
 
             voiceButton.textContent =
-                "🎙 ÉCOUTE EN COURS...";
+                "🎙 DICTER MA DEMANDE";
+
+            return;
+        }
+
+
+        try {
+
+            if (
+                typeof Office !== "undefined" &&
+                Office.context &&
+                Office.context.platform ===
+                    Office.PlatformType.OfficeOnline &&
+                Office.devicePermission
+            ) {
+
+                const permissionGrantedNow =
+                    await Office.devicePermission
+                        .requestPermissions([
+                            Office.DevicePermissionType.microphone
+                        ]);
+
+                if (permissionGrantedNow) {
+
+                    statusText.textContent =
+                        "🎙 Micro autorisé. Rechargement de TableIA...";
+
+                    window.location.reload();
+
+                    return;
+                }
+            }
+
+
+            isListening =
+                true;
+
+            voiceButton.textContent =
+                "⏹ ARRÊTER LA DICTÉE";
 
             recognition.start();
+
+        } catch (error) {
+
+            console.error(error);
+
+            isListening =
+                false;
+
+            voiceButton.textContent =
+                "🎙 DICTER MA DEMANDE";
+
+            statusText.textContent =
+                "❌ Autorisation du microphone impossible.";
         }
-    );
+    }
+);
 
 
     recognition.addEventListener(
@@ -139,6 +207,9 @@ if (SpeechRecognition) {
     recognition.addEventListener(
         "end",
         function () {
+            
+            isListening =
+    false;
 
             voiceButton.textContent =
                 "🎙 DICTER MA DEMANDE";
@@ -149,6 +220,9 @@ if (SpeechRecognition) {
     recognition.addEventListener(
         "error",
         function () {
+
+            isListening =
+    false;
 
             voiceButton.textContent =
                 "🎙 DICTER MA DEMANDE";

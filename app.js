@@ -112,6 +112,12 @@ if (SpeechRecognition) {
                     : transcript;
             clearPromptButton.style.display =
     "block";
+
+            try {
+    recognition.stop();
+} catch (error) {
+    console.log("Micro déjà arrêté");
+            }
         }
     );
 

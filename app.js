@@ -49,11 +49,10 @@ clearPromptButton.style.display =
 textPrompt.addEventListener(
     "input",
     function () {
-
-        clearPromptButton.style.display =
-            textPrompt.value.trim()
-                ? "block"
-                : "none";
+clearPromptButton.style.display =
+    textPrompt.value.trim() || selectedPhoto
+        ? "block"
+        : "none";
     }
 );
 
@@ -288,6 +287,21 @@ clearPromptButton.addEventListener(
         textPrompt.value =
             "";
 
+selectedPhoto =
+    null;
+
+cameraInput.value =
+    "";
+
+galleryInput.value =
+    "";
+
+photoPreview.src =
+    "";
+
+photoPreview.style.display =
+    "none";
+        
 clearPromptButton.style.display =
     "none";
         
@@ -330,6 +344,9 @@ function handleSelectedPhoto(file) {
     photoPreview.style.display =
         "block";
 
+clearPromptButton.style.display =
+    "block";
+    
     statusText.textContent =
         "📷 Photo prise en compte. Prête pour l'analyse.";
 }
@@ -377,6 +394,20 @@ previousTableData =
 
         statusText.textContent =
             "🗑 Tableau supprimé.";
+setTimeout(
+    function () {
+
+        if (
+            statusText.textContent ===
+            "🗑 Tableau supprimé."
+        ) {
+            statusText.textContent =
+                "";
+        }
+    },
+    2000
+);
+        
     }
 );
 async function modifyCurrentTable() {

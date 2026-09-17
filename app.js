@@ -118,6 +118,21 @@ if (SpeechRecognition) {
 } catch (error) {
     console.log("Micro déjà arrêté");
             }
+            
+            setTimeout(
+    function () {
+
+        try {
+            recognition.abort();
+        } catch (error) {
+            console.log("Reconnaissance déjà terminée");
+        }
+
+        voiceButton.textContent =
+            "🎙 DICTER MA DEMANDE";
+    },
+    1500
+);
         }
     );
 

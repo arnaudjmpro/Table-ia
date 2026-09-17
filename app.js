@@ -85,10 +85,16 @@ if (SpeechRecognition) {
 
     let isListening =
     false;
+    let isStarting =
+    false;
 
 voiceButton.addEventListener(
     "click",
     async function () {
+
+        if (isStarting) {
+    return;
+        }
 
         if (isListening) {
 
@@ -109,6 +115,11 @@ voiceButton.addEventListener(
             return;
         }
 
+        isStarting =
+    true;
+
+voiceButton.disabled =
+    true;
 
         try {
 
@@ -148,7 +159,12 @@ voiceButton.addEventListener(
 
             }
 
+isStarting =
+    false;
 
+voiceButton.disabled =
+    false;
+            
             isListening =
                 true;
 
@@ -160,6 +176,12 @@ voiceButton.addEventListener(
         } catch (error) {
 
             console.error(error);
+            
+            isStarting =
+    false;
+
+voiceButton.disabled =
+    false;
 
             isListening =
                 false;

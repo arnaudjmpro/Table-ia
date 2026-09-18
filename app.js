@@ -69,27 +69,235 @@ const SpeechRecognition =
     window.webkitSpeechRecognition;
 
 if (SpeechRecognition) {
-
-    const recognition =
-        new SpeechRecognition();
-
-    recognition.lang =
-        "fr-FR";
-
-    recognition.interimResults =
-        false;
-
-    recognition.continuous =
-        false;
-
+    let recognition = null;
     let recognitionState =
         "idle";
+
+    function resetVoiceButton() {
+        recognitionState =
+            "idle";
+
+        recognition =
+            null;
+
+        voiceButton.disabled =
+            false;
+
+        voiceButton.textContent =
+            "🎙 DICTER MA DEMANDE";
+    }
+
+    function readableError(error) {
+        return (
+            error?.message ||
+            error?.name ||
+            String(error || "erreur inconnue")
+        );
+    }
+
+    async function authorizeMicrophoneInExcel() {
+        // Hors du volet Excel, Chrome gère directement l'autorisation.
+        if (window.self === window.top) {
+            return true;
+        }
+
+        if (typeof Office === "undefined") {
+            throw new Error(
+                "La bibliothèque Office n'est pas chargée."
+            );
+        }
+
+        const officeInfo =
+            await Office.onReady();
+
+        if (
+            !officeInfo ||
+            officeInfo.host !== Office.HostType.Excel
+        ) {
+            throw new Error(
+                "TableIA n'est pas reconnu comme complément Excel."
+            );
+        }
+
+        if (
+            Office.context.platform ===
+            Office.PlatformType.OfficeOnline
+        ) {
+            if (
+                !Office.devicePermission ||
+                typeof Office.devicePermission.requestPermissions !==
+                    "function"
+            ) {
+                throw new Error(
+                    "L'autorisation du microphone Excel n'est pas disponible dans ce navigateur. Utilisez Excel Web dans Google Chrome ou Microsoft Edge."
+                );
+            }
+
+            let permissionGrantedNow;
+
+            try {
+                permissionGrantedNow =
+                    await Office.devicePermission
+                        .requestPermissions([
+                            Office.DevicePermissionType.microphone
+                        ]);
+            } catch (permissionError) {
+                throw new Error(
+                    "Autorisation refusée par Excel : " +
+                    readableError(permissionError)
+                );
+            }
+
+            if (permissionGrantedNow) {
+                statusText.textContent =
+                    "🎙 Micro autorisé par Excel. Rechargement de TableIA...";
+
+                window.setTimeout(
+                    function () {
+                        window.location.reload();
+                    },
+                    500
+                );
+
+                return false;
+            }
+        }
+
+        // Vérifie que le cadre Excel peut réellement ouvrir le flux audio.
+        if (
+            navigator.mediaDevices &&
+            typeof navigator.mediaDevices.getUserMedia ===
+                "function"
+        ) {
+            let stream;
+
+            try {
+                stream =
+                    await navigator.mediaDevices.getUserMedia({
+                        audio: true
+                    });
+            } catch (mediaError) {
+                throw new Error(
+                    "Excel bloque encore le microphone : " +
+                    readableError(mediaError)
+                );
+            } finally {
+                if (stream) {
+                    stream.getTracks().forEach(
+                        function (track) {
+                            track.stop();
+                        }
+                    );
+                }
+            }
+        }
+
+        return true;
+    }
+
+    function createRecognition() {
+        const newRecognition =
+            new SpeechRecognition();
+
+        newRecognition.lang =
+            "fr-FR";
+
+        newRecognition.interimResults =
+            false;
+
+        newRecognition.continuous =
+            false;
+
+        newRecognition.addEventListener(
+            "start",
+            function () {
+                recognitionState =
+                    "listening";
+
+                voiceButton.disabled =
+                    false;
+
+                voiceButton.textContent =
+                    "⏹ ARRÊTER LA DICTÉE";
+
+                statusText.textContent =
+                    "🎙 Je vous écoute...";
+            }
+        );
+
+        newRecognition.addEventListener(
+            "result",
+            function (event) {
+                const transcript =
+                    event.results[0][0].transcript;
+
+                const currentText =
+                    textPrompt.value.trim();
+
+                textPrompt.value =
+                    currentText
+                        ? currentText + " " + transcript
+                        : transcript;
+
+                clearPromptButton.style.display =
+                    "block";
+
+                statusText.textContent =
+                    "✅ Dictée ajoutée à votre demande.";
+            }
+        );
+
+        newRecognition.addEventListener(
+            "end",
+            function () {
+                resetVoiceButton();
+            }
+        );
+
+        newRecognition.addEventListener(
+            "error",
+            function (event) {
+                if (event.error === "no-speech") {
+                    statusText.textContent =
+                        "Aucune parole détectée. Vous pouvez recommencer.";
+                } else if (event.error !== "aborted") {
+                    statusText.textContent =
+                        "❌ Erreur du micro : " +
+                        event.error;
+                }
+
+                recognitionState =
+                    "stopping";
+
+                voiceButton.disabled =
+                    true;
+
+                try {
+                    newRecognition.abort();
+                } catch (abortError) {
+                    console.warn(
+                        "Arrêt du micro impossible.",
+                        abortError
+                    );
+                }
+
+                window.setTimeout(
+                    function () {
+                        if (recognition === newRecognition) {
+                            resetVoiceButton();
+                        }
+                    },
+                    500
+                );
+            }
+        );
+
+        return newRecognition;
+    }
 
     voiceButton.addEventListener(
         "click",
         async function () {
-
-            // Empêche tout double démarrage
             if (
                 recognitionState === "starting" ||
                 recognitionState === "stopping"
@@ -97,9 +305,10 @@ if (SpeechRecognition) {
                 return;
             }
 
-            // Arrêt demandé par l'utilisateur
-            if (recognitionState === "listening") {
-
+            if (
+                recognitionState === "listening" &&
+                recognition
+            ) {
                 recognitionState =
                     "stopping";
 
@@ -111,15 +320,13 @@ if (SpeechRecognition) {
 
                 try {
                     recognition.stop();
-                } catch (error) {
-                    recognitionState =
-                        "idle";
+                } catch (stopError) {
+                    console.warn(
+                        "Arrêt du micro impossible.",
+                        stopError
+                    );
 
-                    voiceButton.disabled =
-                        false;
-
-                    voiceButton.textContent =
-                        "🎙 DICTER MA DEMANDE";
+                    resetVoiceButton();
                 }
 
                 return;
@@ -132,152 +339,42 @@ if (SpeechRecognition) {
                 true;
 
             voiceButton.textContent =
-                "⏳ ACTIVATION DU MICRO...";
+                "⏳ AUTORISATION DU MICRO...";
+
+            statusText.textContent =
+                "Vérification de l'autorisation Excel...";
 
             try {
+                const canStart =
+                    await authorizeMicrophoneInExcel();
 
-                if (
-                    typeof Office !== "undefined" &&
-                    Office.context &&
-                    Office.context.platform ===
-                        Office.PlatformType.OfficeOnline &&
-                    Office.devicePermission
-                ) {
+                if (!canStart) {
+                    return;
+                }
 
+                recognition =
+                    createRecognition();
+
+                recognition.start();
+            } catch (error) {
+                console.error(error);
+
+                statusText.textContent =
+                    "❌ Micro : " +
+                    readableError(error);
+
+                if (recognition) {
                     try {
-
-                        const permissionGrantedNow =
-                            await Office.devicePermission
-                                .requestPermissions([
-                                    Office.DevicePermissionType.microphone
-                                ]);
-
-                        if (permissionGrantedNow) {
-
-                            statusText.textContent =
-                                "🎙 Micro autorisé. Rechargement de TableIA...";
-
-                            window.location.reload();
-
-                            return;
-                        }
-
-                    } catch (permissionError) {
-
+                        recognition.abort();
+                    } catch (abortError) {
                         console.warn(
-                            "Office devicePermission indisponible. Essai direct du micro.",
-                            permissionError
+                            "Réinitialisation du micro impossible.",
+                            abortError
                         );
                     }
                 }
 
-                recognition.start();
-
-            } catch (error) {
-
-                console.error(error);
-
-                recognitionState =
-                    "idle";
-
-                voiceButton.disabled =
-                    false;
-
-                voiceButton.textContent =
-                    "🎙 DICTER MA DEMANDE";
-
-                statusText.textContent =
-                    "❌ Micro : " +
-                    (
-                        error?.message ||
-                        error?.name ||
-                        "erreur inconnue"
-                    );
-            }
-        }
-    );
-
-    recognition.addEventListener(
-        "start",
-        function () {
-
-            recognitionState =
-                "listening";
-
-            voiceButton.disabled =
-                false;
-
-            voiceButton.textContent =
-                "⏹ ARRÊTER LA DICTÉE";
-
-            statusText.textContent =
-                "🎙 Je vous écoute...";
-        }
-    );
-
-    recognition.addEventListener(
-        "result",
-        function (event) {
-
-            const transcript =
-                event.results[0][0].transcript;
-
-            const currentText =
-                textPrompt.value.trim();
-
-            textPrompt.value =
-                currentText
-                    ? currentText + " " + transcript
-                    : transcript;
-
-            clearPromptButton.style.display =
-                "block";
-
-            statusText.textContent =
-                "✅ Dictée ajoutée à votre demande.";
-        }
-    );
-
-    recognition.addEventListener(
-        "end",
-        function () {
-
-            // Le micro est réellement disponible
-            // seulement lorsque l'événement end est reçu
-            recognitionState =
-                "idle";
-
-            voiceButton.disabled =
-                false;
-
-            voiceButton.textContent =
-                "🎙 DICTER MA DEMANDE";
-        }
-    );
-
-    recognition.addEventListener(
-        "error",
-        function (event) {
-
-            recognitionState =
-                "idle";
-
-            voiceButton.disabled =
-                false;
-
-            voiceButton.textContent =
-                "🎙 DICTER MA DEMANDE";
-
-            if (event.error === "no-speech") {
-
-                statusText.textContent =
-                    "Aucune parole détectée. Vous pouvez recommencer.";
-
-            } else if (event.error !== "aborted") {
-
-                statusText.textContent =
-                    "❌ Erreur du micro : " +
-                    event.error;
+                resetVoiceButton();
             }
         }
     );
@@ -289,7 +386,7 @@ if (SpeechRecognition) {
 
     voiceButton.textContent =
         "🎙 VOIX NON DISPONIBLE";
-        }
+}
 // ==========================================
 // CREATION PAR TEXTE
 // ==========================================

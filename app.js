@@ -209,57 +209,225 @@ voiceButton.disabled =
 
             textPrompt.value =
                 currentText
-                    ? currentText + " " + transcript
-                    : transcript;
-            clearPromptButton.style.display =
-    "block";
+// ==========================================
+// DICTÉE VOCALE
+// ==========================================
+
+const SpeechRecognition =
+    window.SpeechRecognition ||
+    window.webkitSpeechRecognition;
+
+if (SpeechRecognition) {
+
+    const recognition =
+        new SpeechRecognition();
+
+    recognition.lang =
+        "fr-FR";
+
+    recognition.interimResults =
+        false;
+
+    recognition.continuous =
+        false;
+
+    let recognitionState =
+        "idle";
+
+    voiceButton.addEventListener(
+        "click",
+        async function () {
+
+            // Empêche tout double démarrage
+            if (
+                recognitionState === "starting" ||
+                recognitionState === "stopping"
+            ) {
+                return;
+            }
+
+            // Arrêt demandé par l'utilisateur
+            if (recognitionState === "listening") {
+
+                recognitionState =
+                    "stopping";
+
+                voiceButton.disabled =
+                    true;
+
+                voiceButton.textContent =
+                    "⏳ ARRÊT EN COURS...";
+
+                try {
+                    recognition.stop();
+                } catch (error) {
+                    recognitionState =
+                        "idle";
+
+                    voiceButton.disabled =
+                        false;
+
+                    voiceButton.textContent =
+                        "🎙 DICTER MA DEMANDE";
+                }
+
+                return;
+            }
+
+            recognitionState =
+                "starting";
+
+            voiceButton.disabled =
+                true;
+
+            voiceButton.textContent =
+                "⏳ ACTIVATION DU MICRO...";
 
             try {
-    recognition.stop();
-} catch (error) {
-    console.log("Micro déjà arrêté");
+
+                if (
+                    typeof Office !== "undefined" &&
+                    Office.context &&
+                    Office.context.platform ===
+                        Office.PlatformType.OfficeOnline &&
+                    Office.devicePermission
+                ) {
+
+                    try {
+
+                        const permissionGrantedNow =
+                            await Office.devicePermission
+                                .requestPermissions([
+                                    Office.DevicePermissionType.microphone
+                                ]);
+
+                        if (permissionGrantedNow) {
+
+                            statusText.textContent =
+                                "🎙 Micro autorisé. Rechargement de TableIA...";
+
+                            window.location.reload();
+
+                            return;
+                        }
+
+                    } catch (permissionError) {
+
+                        console.warn(
+                            "Office devicePermission indisponible. Essai direct du micro.",
+                            permissionError
+                        );
+                    }
+                }
+
+                recognition.start();
+
+            } catch (error) {
+
+                console.error(error);
+
+                recognitionState =
+                    "idle";
+
+                voiceButton.disabled =
+                    false;
+
+                voiceButton.textContent =
+                    "🎙 DICTER MA DEMANDE";
+
+                statusText.textContent =
+                    "❌ Micro : " +
+                    (
+                        error?.message ||
+                        error?.name ||
+                        "erreur inconnue"
+                    );
             }
-            
-            setTimeout(
-    function () {
-
-        try {
-            recognition.abort();
-        } catch (error) {
-            console.log("Reconnaissance déjà terminée");
-        }
-
-        voiceButton.textContent =
-            "🎙 DICTER MA DEMANDE";
-    },
-    1500
-);
         }
     );
 
+    recognition.addEventListener(
+        "start",
+        function () {
+
+            recognitionState =
+                "listening";
+
+            voiceButton.disabled =
+                false;
+
+            voiceButton.textContent =
+                "⏹ ARRÊTER LA DICTÉE";
+
+            statusText.textContent =
+                "🎙 Je vous écoute...";
+        }
+    );
+
+    recognition.addEventListener(
+        "result",
+        function (event) {
+
+            const transcript =
+                event.results[0][0].transcript;
+
+            const currentText =
+                textPrompt.value.trim();
+
+            textPrompt.value =
+                currentText
+                    ? currentText + " " + transcript
+                    : transcript;
+
+            clearPromptButton.style.display =
+                "block";
+
+            statusText.textContent =
+                "✅ Dictée ajoutée à votre demande.";
+        }
+    );
 
     recognition.addEventListener(
         "end",
         function () {
-            
-            isListening =
-    false;
+
+            // Le micro est réellement disponible
+            // seulement lorsque l'événement end est reçu
+            recognitionState =
+                "idle";
+
+            voiceButton.disabled =
+                false;
 
             voiceButton.textContent =
                 "🎙 DICTER MA DEMANDE";
         }
     );
 
-
     recognition.addEventListener(
         "error",
-        function () {
+        function (event) {
 
-            isListening =
-    false;
+            recognitionState =
+                "idle";
+
+            voiceButton.disabled =
+                false;
 
             voiceButton.textContent =
                 "🎙 DICTER MA DEMANDE";
+
+            if (event.error === "no-speech") {
+
+                statusText.textContent =
+                    "Aucune parole détectée. Vous pouvez recommencer.";
+
+            } else if (event.error !== "aborted") {
+
+                statusText.textContent =
+                    "❌ Erreur du micro : " +
+                    event.error;
+            }
         }
     );
 
@@ -270,8 +438,7 @@ voiceButton.disabled =
 
     voiceButton.textContent =
         "🎙 VOIX NON DISPONIBLE";
-}
-
+        }
 // ==========================================
 // CREATION PAR TEXTE
 // ==========================================

@@ -43,6 +43,38 @@ const deleteTableButton =
 const insertExcelButton =
     document.getElementById("insertExcelButton");
 
+const isEmbeddedInOffice =
+    window.self !== window.top;
+
+let officeReadyInfo = null;
+let officeReadyError = null;
+
+let officeInitialization =
+    Promise.resolve(null);
+
+// Office est initialisé dès le chargement de la page. Ainsi, au moment où
+// l'utilisateur appuie sur le bouton, la demande de permission est appelée
+// directement depuis le clic, sans attente préalable qui invaliderait le geste.
+if (
+    isEmbeddedInOffice &&
+    typeof Office !== "undefined"
+) {
+    officeInitialization =
+        Office.onReady()
+            .then(function (info) {
+                officeReadyInfo =
+                    info;
+
+                return info;
+            })
+            .catch(function (error) {
+                officeReadyError =
+                    error;
+
+                return null;
+            });
+}
+
 clearPromptButton.style.display =
     "none";
 
@@ -88,11 +120,17 @@ if (SpeechRecognition) {
     }
 
     function readableError(error) {
-        return (
-            error?.message ||
-            error?.name ||
-            String(error || "erreur inconnue")
-        );
+        const details = [
+            error?.name,
+            error?.code,
+            error?.message
+        ].filter(function (value, index, values) {
+            return value && values.indexOf(value) === index;
+        });
+
+        return details.length
+            ? details.join(" — ")
+            : String(error || "erreur inconnue");
     }
 
     async function authorizeMicrophoneInExcel() {
@@ -107,12 +145,17 @@ if (SpeechRecognition) {
             );
         }
 
-        const officeInfo =
-            await Office.onReady();
+        if (
+            !officeReadyInfo
+        ) {
+            throw new Error(
+                "Excel n'a pas terminé l'initialisation de TableIA. Patientez une seconde puis réessayez. " +
+                readableError(officeReadyError)
+            );
+        }
 
         if (
-            !officeInfo ||
-            officeInfo.host !== Office.HostType.Excel
+            officeReadyInfo.host !== Office.HostType.Excel
         ) {
             throw new Error(
                 "TableIA n'est pas reconnu comme complément Excel."
@@ -123,6 +166,20 @@ if (SpeechRecognition) {
             Office.context.platform ===
             Office.PlatformType.OfficeOnline
         ) {
+            if (
+                Office.context.requirements &&
+                typeof Office.context.requirements.isSetSupported ===
+                    "function" &&
+                !Office.context.requirements.isSetSupported(
+                    "DevicePermissionService",
+                    "1.1"
+                )
+            ) {
+                throw new Error(
+                    "Cette version d'Excel ne prend pas en charge DevicePermissionService 1.1."
+                );
+            }
+
             if (
                 !Office.devicePermission ||
                 typeof Office.devicePermission.requestPermissions !==
@@ -378,6 +435,32 @@ if (SpeechRecognition) {
             }
         }
     );
+
+    if (isEmbeddedInOffice) {
+        voiceButton.disabled =
+            true;
+
+        voiceButton.textContent =
+            "⏳ INITIALISATION EXCEL...";
+
+        officeInitialization.then(
+            function (info) {
+                if (info) {
+                    resetVoiceButton();
+                } else {
+                    voiceButton.disabled =
+                        true;
+
+                    voiceButton.textContent =
+                        "🎙 MICROPHONE INDISPONIBLE";
+
+                    statusText.textContent =
+                        "❌ Initialisation Excel impossible : " +
+                        readableError(officeReadyError);
+                }
+            }
+        );
+    }
 
 } else {
 

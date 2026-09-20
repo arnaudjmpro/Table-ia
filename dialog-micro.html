@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+    <title>Dictée TableIA</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 18px;
+            background: #f4f7fb;
+            color: #1f2937;
+            font-family: Arial, sans-serif;
+        }
+
+        .dialog-card {
+            width: 100%;
+            max-width: 430px;
+            padding: 22px;
+            border-radius: 18px;
+            background: #ffffff;
+            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.14);
+            text-align: center;
+        }
+
+        h1 {
+            margin: 0 0 10px;
+            font-size: 23px;
+        }
+
+        #message {
+            min-height: 48px;
+            margin: 0 0 16px;
+            color: #4b5563;
+            line-height: 1.4;
+        }
+
+        button {
+            width: 100%;
+            min-height: 52px;
+            border: 0;
+            border-radius: 12px;
+            background: #138a47;
+            color: #ffffff;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            cursor: default;
+            opacity: 0.65;
+        }
+
+        .privacy {
+            margin: 14px 0 0;
+            color: #6b7280;
+            font-size: 12px;
+            line-height: 1.35;
+        }
+    </style>
+</head>
+<body>
+    <main class="dialog-card">
+        <h1>🎙 Dictée TableIA</h1>
+
+        <p id="message">
+            Appuyez sur le bouton puis dictez votre demande.
+        </p>
+
+        <button id="startButton" type="button">
+            🎙 COMMENCER LA DICTÉE
+        </button>
+
+        <p class="privacy">
+            Le microphone sert uniquement à transcrire votre demande.
+        </p>
+    </main>
+
+    <script src="https://officeapis.public.onecdn.static.microsoft/1/office.js"></script>
+    <script>
+        const startButton =
+            document.getElementById("startButton");
+
+        const message =
+            document.getElementById("message");
+
+        const SpeechRecognition =
+            window.SpeechRecognition ||
+            window.webkitSpeechRecognition;
+
+        let recognition = null;
+        let officeReady = false;
+
+        function sendToTableIA(payload) {
+            if (
+                typeof Office === "undefined" ||
+                !Office.context ||
+                !Office.context.ui ||
+                typeof Office.context.ui.messageParent !== "function"
+            ) {
+                throw new Error(
+                    "La communication avec Excel n'est pas disponible."
+                );
+            }
+
+            Office.context.ui.messageParent(
+                JSON.stringify(payload)
+            );
+        }
+
+        function showError(errorText) {
+            message.textContent =
+                "❌ " + errorText;
+
+            startButton.disabled =
+                false;
+
+            startButton.textContent =
+                "🎙 RÉESSAYER";
+        }
+
+        if (typeof Office !== "undefined") {
+            Office.onReady()
+                .then(function () {
+                    officeReady = true;
+                })
+                .catch(function () {
+                    showError(
+                        "La fenêtre de dictée n'a pas pu communiquer avec Excel."
+                    );
+                });
+        }
+
+        if (!SpeechRecognition) {
+            startButton.disabled =
+                true;
+
+            startButton.textContent =
+                "🎙 DICTÉE NON DISPONIBLE";
+
+            message.textContent =
+                "La reconnaissance vocale n'est pas disponible dans ce navigateur.";
+        } else {
+            startButton.addEventListener(
+                "click",
+                function () {
+                    if (!officeReady) {
+                        showError(
+                            "Excel termine l'ouverture de la fenêtre. Réessayez dans une seconde."
+                        );
+                        return;
+                    }
+
+                    startButton.disabled =
+                        true;
+
+                    startButton.textContent =
+                        "🎙 ÉCOUTE EN COURS...";
+
+                    message.textContent =
+                        "Parlez maintenant. La fenêtre se fermera après la transcription.";
+
+                    recognition =
+                        new SpeechRecognition();
+
+                    recognition.lang =
+                        "fr-FR";
+
+                    recognition.interimResults =
+                        false;
+
+                    recognition.continuous =
+                        false;
+
+                    recognition.addEventListener(
+                        "result",
+                        function (event) {
+                            const transcript =
+                                event.results[0][0].transcript.trim();
+
+                            if (!transcript) {
+                                showError(
+                                    "Aucun texte n'a été reconnu."
+                                );
+                                return;
+                            }
+
+                            message.textContent =
+                                "✅ Transcription terminée.";
+
+                            try {
+                                sendToTableIA({
+                                    type: "tableia-transcript",
+                                    text: transcript
+                                });
+                            } catch (error) {
+                                showError(error.message);
+                            }
+                        }
+                    );
+
+                    recognition.addEventListener(
+                        "error",
+                        function (event) {
+                            const messages = {
+                                "not-allowed": "L'accès au microphone a été refusé par le navigateur.",
+                                "audio-capture": "Aucun microphone n'est disponible.",
+                                "no-speech": "Aucune parole n'a été détectée.",
+                                "network": "Le service de reconnaissance vocale est momentanément indisponible."
+                            };
+
+                            showError(
+                                messages[event.error] ||
+                                "Erreur du microphone : " + event.error
+                            );
+                        }
+                    );
+
+                    recognition.addEventListener(
+                        "end",
+                        function () {
+                            if (
+                                startButton.disabled &&
+                                message.textContent.indexOf("Transcription terminée") === -1
+                            ) {
+                                showError(
+                                    "La dictée s'est arrêtée sans transcription."
+                                );
+                            }
+                        }
+                    );
+
+                    try {
+                        recognition.start();
+                    } catch (error) {
+                        showError(
+                            error.message ||
+                            "Impossible de démarrer la dictée."
+                        );
+                    }
+                }
+            );
+        }
+    </script>
+</body>
+</html>

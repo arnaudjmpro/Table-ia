@@ -100,8 +100,9 @@ const SpeechRecognition =
     window.SpeechRecognition ||
     window.webkitSpeechRecognition;
 
-if (SpeechRecognition) {
+if (SpeechRecognition || isEmbeddedInOffice) {
     let recognition = null;
+    let voiceDialog = null;
     let recognitionState =
         "idle";
 
@@ -133,123 +134,152 @@ if (SpeechRecognition) {
             : String(error || "erreur inconnue");
     }
 
-    async function authorizeMicrophoneInExcel() {
-        // Hors du volet Excel, Chrome gère directement l'autorisation.
-        if (window.self === window.top) {
-            return true;
+    function appendTranscript(transcript) {
+        const cleanTranscript =
+            String(transcript || "").trim();
+
+        if (!cleanTranscript) {
+            return;
         }
 
-        if (typeof Office === "undefined") {
+        const currentText =
+            textPrompt.value.trim();
+
+        textPrompt.value =
+            currentText
+                ? currentText + " " + cleanTranscript
+                : cleanTranscript;
+
+        clearPromptButton.style.display =
+            "block";
+    }
+
+    function openOfficeVoiceDialog() {
+        if (
+            typeof Office === "undefined" ||
+            !Office.context ||
+            !Office.context.ui ||
+            typeof Office.context.ui.displayDialogAsync !== "function"
+        ) {
             throw new Error(
-                "La bibliothèque Office n'est pas chargée."
+                "La fenêtre officielle de dictée n'est pas disponible dans cette version d'Excel."
             );
         }
 
-        if (
-            !officeReadyInfo
-        ) {
-            throw new Error(
-                "Excel n'a pas terminé l'initialisation de TableIA. Patientez une seconde puis réessayez. " +
-                readableError(officeReadyError)
-            );
-        }
+        const dialogUrl =
+            new URL(
+                "dialog-micro.html",
+                window.location.href
+            ).href;
 
-        if (
-            officeReadyInfo.host !== Office.HostType.Excel
-        ) {
-            throw new Error(
-                "TableIA n'est pas reconnu comme complément Excel."
-            );
-        }
+        recognitionState =
+            "starting";
 
-        if (
-            Office.context.platform ===
-            Office.PlatformType.OfficeOnline
-        ) {
-            if (
-                Office.context.requirements &&
-                typeof Office.context.requirements.isSetSupported ===
-                    "function" &&
-                !Office.context.requirements.isSetSupported(
-                    "DevicePermissionService",
-                    "1.1"
-                )
-            ) {
-                throw new Error(
-                    "Cette version d'Excel ne prend pas en charge DevicePermissionService 1.1."
-                );
-            }
+        voiceButton.disabled =
+            true;
 
-            if (
-                !Office.devicePermission ||
-                typeof Office.devicePermission.requestPermissions !==
-                    "function"
-            ) {
-                throw new Error(
-                    "L'autorisation du microphone Excel n'est pas disponible dans ce navigateur. Utilisez Excel Web dans Google Chrome ou Microsoft Edge."
-                );
-            }
+        voiceButton.textContent =
+            "⏳ OUVERTURE DE LA DICTÉE...";
 
-            let permissionGrantedNow;
+        statusText.textContent =
+            "Ouverture de la fenêtre sécurisée de dictée...";
 
-            try {
-                permissionGrantedNow =
-                    await Office.devicePermission
-                        .requestPermissions([
-                            Office.DevicePermissionType.microphone
-                        ]);
-            } catch (permissionError) {
-                throw new Error(
-                    "Autorisation refusée par Excel : " +
-                    readableError(permissionError)
-                );
-            }
+        Office.context.ui.displayDialogAsync(
+            dialogUrl,
+            {
+                height: 35,
+                width: 30,
+                displayInIframe: false
+            },
+            function (asyncResult) {
+                if (
+                    asyncResult.status !==
+                    Office.AsyncResultStatus.Succeeded
+                ) {
+                    statusText.textContent =
+                        "❌ Ouverture de la dictée impossible : " +
+                        readableError(asyncResult.error);
 
-            if (permissionGrantedNow) {
-                statusText.textContent =
-                    "🎙 Micro autorisé par Excel. Rechargement de TableIA...";
-
-                window.setTimeout(
-                    function () {
-                        window.location.reload();
-                    },
-                    500
-                );
-
-                return false;
-            }
-        }
-
-        // Vérifie que le cadre Excel peut réellement ouvrir le flux audio.
-        if (
-            navigator.mediaDevices &&
-            typeof navigator.mediaDevices.getUserMedia ===
-                "function"
-        ) {
-            let stream;
-
-            try {
-                stream =
-                    await navigator.mediaDevices.getUserMedia({
-                        audio: true
-                    });
-            } catch (mediaError) {
-                throw new Error(
-                    "Excel bloque encore le microphone : " +
-                    readableError(mediaError)
-                );
-            } finally {
-                if (stream) {
-                    stream.getTracks().forEach(
-                        function (track) {
-                            track.stop();
-                        }
-                    );
+                    resetVoiceButton();
+                    return;
                 }
-            }
-        }
 
-        return true;
+                voiceDialog =
+                    asyncResult.value;
+
+                let dialogFinished =
+                    false;
+
+                recognitionState =
+                    "listening";
+
+                voiceButton.disabled =
+                    true;
+
+                voiceButton.textContent =
+                    "🎙 DICTÉE OUVERTE";
+
+                statusText.textContent =
+                    "🎙 Dictez votre demande dans la petite fenêtre.";
+
+                voiceDialog.addEventHandler(
+                    Office.EventType.DialogMessageReceived,
+                    function (event) {
+                        let payload;
+
+                        try {
+                            payload =
+                                JSON.parse(event.message);
+                        } catch (parseError) {
+                            payload = {
+                                type: "dialog-error",
+                                message: "Réponse de dictée invalide."
+                            };
+                        }
+
+                        if (
+                            payload.type ===
+                            "tableia-transcript"
+                        ) {
+                            dialogFinished =
+                                true;
+
+                            appendTranscript(
+                                payload.text
+                            );
+
+                            statusText.textContent =
+                                "✅ Dictée ajoutée à votre demande.";
+
+                            voiceDialog.close();
+                            voiceDialog = null;
+                            resetVoiceButton();
+                            return;
+                        }
+
+                        statusText.textContent =
+                            "❌ Dictée : " +
+                            (payload.message ||
+                                "Une erreur inconnue s'est produite.");
+                    }
+                );
+
+                voiceDialog.addEventHandler(
+                    Office.EventType.DialogEventReceived,
+                    function () {
+                        voiceDialog =
+                            null;
+
+                        if (!dialogFinished) {
+                            statusText.textContent =
+                                "Dictée fermée sans ajouter de texte.";
+                        }
+
+                        resetVoiceButton();
+                    }
+                );
+            }
+        );
     }
 
     function createRecognition() {
@@ -288,16 +318,9 @@ if (SpeechRecognition) {
                 const transcript =
                     event.results[0][0].transcript;
 
-                const currentText =
-                    textPrompt.value.trim();
-
-                textPrompt.value =
-                    currentText
-                        ? currentText + " " + transcript
-                        : transcript;
-
-                clearPromptButton.style.display =
-                    "block";
+                appendTranscript(
+                    transcript
+                );
 
                 statusText.textContent =
                     "✅ Dictée ajoutée à votre demande.";
@@ -362,6 +385,26 @@ if (SpeechRecognition) {
                 return;
             }
 
+            if (isEmbeddedInOffice) {
+                if (voiceDialog) {
+                    return;
+                }
+
+                try {
+                    openOfficeVoiceDialog();
+                } catch (dialogError) {
+                    console.error(dialogError);
+
+                    statusText.textContent =
+                        "❌ Dictée : " +
+                        readableError(dialogError);
+
+                    resetVoiceButton();
+                }
+
+                return;
+            }
+
             if (
                 recognitionState === "listening" &&
                 recognition
@@ -396,19 +439,12 @@ if (SpeechRecognition) {
                 true;
 
             voiceButton.textContent =
-                "⏳ AUTORISATION DU MICRO...";
+                "⏳ DÉMARRAGE DU MICRO...";
 
             statusText.textContent =
-                "Vérification de l'autorisation Excel...";
+                "Démarrage de la dictée...";
 
             try {
-                const canStart =
-                    await authorizeMicrophoneInExcel();
-
-                if (!canStart) {
-                    return;
-                }
-
                 recognition =
                     createRecognition();
 

@@ -131,6 +131,29 @@
                 "🎙 RÉESSAYER";
         }
 
+        function hideListeningMessageAfterTwoSeconds() {
+            const listeningMessage =
+                "Parlez maintenant. La fenêtre se fermera après la transcription.";
+
+            window.setTimeout(
+                function () {
+                    if (message.textContent === listeningMessage) {
+                        message.textContent =
+                            "";
+                    }
+
+                    if (
+                        startButton.disabled &&
+                        startButton.textContent.indexOf("ÉCOUTE EN COURS") !== -1
+                    ) {
+                        startButton.textContent =
+                            "🎙";
+                    }
+                },
+                2000
+            );
+        }
+
         if (typeof Office !== "undefined") {
             Office.onReady()
                 .then(function () {
@@ -171,6 +194,8 @@
 
                     message.textContent =
                         "Parlez maintenant. La fenêtre se fermera après la transcription.";
+
+                    hideListeningMessageAfterTwoSeconds();
 
                     recognition =
                         new SpeechRecognition();

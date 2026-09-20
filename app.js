@@ -134,6 +134,21 @@ if (SpeechRecognition || isEmbeddedInOffice) {
             : String(error || "erreur inconnue");
     }
 
+    function showTemporaryStatus(message, delay) {
+        statusText.textContent =
+            message;
+
+        window.setTimeout(
+            function () {
+                if (statusText.textContent === message) {
+                    statusText.textContent =
+                        "";
+                }
+            },
+            delay || 2000
+        );
+    }
+
     function appendTranscript(transcript) {
         const cleanTranscript =
             String(transcript || "").trim();
@@ -219,8 +234,10 @@ if (SpeechRecognition || isEmbeddedInOffice) {
                 voiceButton.textContent =
                     "🎙 DICTÉE OUVERTE";
 
-                statusText.textContent =
-                    "🎙 Dictez votre demande dans la petite fenêtre.";
+                showTemporaryStatus(
+                    "🎙 Dictez votre demande dans la petite fenêtre.",
+                    2000
+                );
 
                 voiceDialog.addEventHandler(
                     Office.EventType.DialogMessageReceived,
@@ -248,8 +265,10 @@ if (SpeechRecognition || isEmbeddedInOffice) {
                                 payload.text
                             );
 
-                            statusText.textContent =
-                                "✅ Dictée ajoutée à votre demande.";
+                            showTemporaryStatus(
+                                "✅ Dictée ajoutée à votre demande.",
+                                2000
+                            );
 
                             voiceDialog.close();
                             voiceDialog = null;
@@ -307,8 +326,10 @@ if (SpeechRecognition || isEmbeddedInOffice) {
                 voiceButton.textContent =
                     "⏹ ARRÊTER LA DICTÉE";
 
-                statusText.textContent =
-                    "🎙 Je vous écoute...";
+                showTemporaryStatus(
+                    "🎙 Je vous écoute...",
+                    2000
+                );
             }
         );
 
@@ -322,8 +343,10 @@ if (SpeechRecognition || isEmbeddedInOffice) {
                     transcript
                 );
 
-                statusText.textContent =
-                    "✅ Dictée ajoutée à votre demande.";
+                showTemporaryStatus(
+                    "✅ Dictée ajoutée à votre demande.",
+                    2000
+                );
             }
         );
 

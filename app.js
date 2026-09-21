@@ -1201,10 +1201,28 @@ insertExcelButton.addEventListener(
                                     1
                                 );
 
+                            const columnFormula =
+                                String(
+                                    column.formula || ""
+                                ).trim();
+
+                            // Une cellule calculée ne doit jamais être forcée
+                            // au format texte, sinon Excel affiche la formule
+                            // au lieu de l'exécuter (cas des colonnes "status").
+                            const formulaReturnsText =
+                                columnFormula &&
+                                [
+                                    "text",
+                                    "status",
+                                    "boolean"
+                                ].includes(column.type);
+
                             const numberFormat =
-                                excelNumberFormatForType(
-                                    column.type
-                                );
+                                formulaReturnsText
+                                    ? "General"
+                                    : excelNumberFormatForType(
+                                        column.type
+                                    );
 
                             columnRange.numberFormat =
                                 Array.from(
@@ -1217,11 +1235,6 @@ insertExcelButton.addEventListener(
                                         ];
                                     }
                                 );
-
-                            const columnFormula =
-                                String(
-                                    column.formula || ""
-                                ).trim();
 
                             if (columnFormula) {
                                 columnRange.formulas =

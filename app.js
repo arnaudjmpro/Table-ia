@@ -896,6 +896,176 @@ undoTableButton.addEventListener(
 // INSERTION DANS EXCEL
 // ==========================================
 
+function createExcelWorksheetName(title) {
+    const suffix =
+        Date.now().toString().slice(-6);
+
+    const cleanTitle =
+        String(title || "TableIA")
+            .replace(/[\\/:?*\[\]]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 23) ||
+        "TableIA";
+
+    return (
+        cleanTitle + " " + suffix
+    ).slice(0, 31);
+}
+
+function normalizeExcelFormula(
+    formula,
+    replacements
+) {
+    const cleanFormula =
+        String(formula || "")
+            .trim()
+            .replace(/^=/, "");
+
+    if (!cleanFormula) {
+        return "";
+    }
+
+    let result =
+        cleanFormula;
+
+    Object.keys(replacements).forEach(
+        function (placeholder) {
+            result = result.replace(
+                new RegExp(
+                    "\\{" + placeholder + "\\}",
+                    "g"
+                ),
+                String(replacements[placeholder])
+            );
+        }
+    );
+
+    return "=" + result;
+}
+
+function coerceExcelValue(value, type) {
+    if (
+        value === null ||
+        value === undefined ||
+        String(value).trim() === ""
+    ) {
+        return "";
+    }
+
+    const text =
+        String(value).trim();
+
+    if (
+        type === "number" ||
+        type === "currency" ||
+        type === "percentage"
+    ) {
+        const normalizedNumber =
+            text
+                .replace(/\s/g, "")
+                .replace(/[€$£%]/g, "")
+                .replace(",", ".");
+
+        const numericValue =
+            Number(normalizedNumber);
+
+        if (!Number.isNaN(numericValue)) {
+            if (
+                type === "percentage" &&
+                text.includes("%")
+            ) {
+                return numericValue / 100;
+            }
+
+            return numericValue;
+        }
+    }
+
+    if (type === "boolean") {
+        const normalizedBoolean =
+            text.toLowerCase();
+
+        if (
+            normalizedBoolean === "true" ||
+            normalizedBoolean === "vrai" ||
+            normalizedBoolean === "oui"
+        ) {
+            return true;
+        }
+
+        if (
+            normalizedBoolean === "false" ||
+            normalizedBoolean === "faux" ||
+            normalizedBoolean === "non"
+        ) {
+            return false;
+        }
+    }
+
+    if (type === "date") {
+        let day;
+        let month;
+        let year;
+
+        const frenchDate =
+            text.match(
+                /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/
+            );
+
+        const isoDate =
+            text.match(
+                /^(\d{4})-(\d{1,2})-(\d{1,2})$/
+            );
+
+        if (frenchDate) {
+            day = Number(frenchDate[1]);
+            month = Number(frenchDate[2]);
+            year = Number(frenchDate[3]);
+        } else if (isoDate) {
+            year = Number(isoDate[1]);
+            month = Number(isoDate[2]);
+            day = Number(isoDate[3]);
+        }
+
+        if (day && month && year) {
+            return (
+                Date.UTC(
+                    year,
+                    month - 1,
+                    day
+                ) /
+                86400000
+            ) + 25569;
+        }
+    }
+
+    return text;
+}
+
+function excelNumberFormatForType(type) {
+    switch (String(type || "text")) {
+        case "currency":
+            return "#,##0.00 €";
+
+        case "percentage":
+            return "0.00%";
+
+        case "number":
+            return "0.##";
+
+        case "date":
+            return "dd/mm/yyyy";
+
+        case "text":
+        case "status":
+            return "@";
+
+        default:
+            return "General";
+    }
+}
+
 insertExcelButton.addEventListener(
     "click",
     async function () {
@@ -923,9 +1093,39 @@ insertExcelButton.addEventListener(
             await Excel.run(
                 async function (context) {
 
-                    const sheet =
+                    let sheet =
                         context.workbook.worksheets
                             .getActiveWorksheet();
+
+                    const usedRange =
+                        sheet.getUsedRange();
+
+                    usedRange.load("values");
+
+                    await context.sync();
+
+                    const activeSheetContainsData =
+                        usedRange.values.some(
+                            function (row) {
+                                return row.some(
+                                    function (value) {
+                                        return value !== "" &&
+                                            value !== null;
+                                    }
+                                );
+                            }
+                        );
+
+                    if (activeSheetContainsData) {
+                        sheet =
+                            context.workbook.worksheets.add(
+                                createExcelWorksheetName(
+                                    currentTableData.title
+                                )
+                            );
+
+                        sheet.activate();
+                    }
 
                     const headers =
                         currentTableData.columns.map(
@@ -935,9 +1135,10 @@ insertExcelButton.addEventListener(
                         );
 
                     const rows =
-                        Array.isArray(currentTableData.rows)
+                        Array.isArray(currentTableData.rows) &&
+                        currentTableData.rows.length
                             ? currentTableData.rows
-                            : [];
+                            : [[], [], []];
 
                     const values = [
                         headers,
@@ -945,7 +1146,12 @@ insertExcelButton.addEventListener(
                             function (row) {
                                 return headers.map(
                                     function (_, index) {
-                                        return row[index] ?? "";
+                                        return coerceExcelValue(
+                                            row[index],
+                                            currentTableData.columns[
+                                                index
+                                            ]?.type
+                                        );
                                     }
                                 );
                             }
@@ -963,22 +1169,174 @@ insertExcelButton.addEventListener(
                     range.values =
                         values;
 
-                    range.format.autofitColumns();
-                    range.format.autofitRows();
+                    const table =
+                        sheet.tables.add(
+                            range,
+                            true
+                        );
+
+                    table.name =
+                        "TableIA_" +
+                        Date.now().toString().slice(-8);
+
+                    table.style =
+                        "TableStyleMedium7";
+
+                    table.showHeaders =
+                        true;
+
+                    table.showTotals =
+                        false;
+
+                    const dataRowCount =
+                        rows.length;
+
+                    currentTableData.columns.forEach(
+                        function (column, columnIndex) {
+                            const columnRange =
+                                sheet.getRangeByIndexes(
+                                    1,
+                                    columnIndex,
+                                    dataRowCount,
+                                    1
+                                );
+
+                            const numberFormat =
+                                excelNumberFormatForType(
+                                    column.type
+                                );
+
+                            columnRange.numberFormat =
+                                Array.from(
+                                    {
+                                        length: dataRowCount
+                                    },
+                                    function () {
+                                        return [
+                                            numberFormat
+                                        ];
+                                    }
+                                );
+
+                            const columnFormula =
+                                String(
+                                    column.formula || ""
+                                ).trim();
+
+                            if (columnFormula) {
+                                columnRange.formulas =
+                                    Array.from(
+                                        {
+                                            length: dataRowCount
+                                        },
+                                        function (_, rowIndex) {
+                                            return [
+                                                normalizeExcelFormula(
+                                                    columnFormula,
+                                                    {
+                                                        row:
+                                                            rowIndex + 2
+                                                    }
+                                                )
+                                            ];
+                                        }
+                                    );
+                            }
+                        }
+                    );
+
+                    const summaries =
+                        Array.isArray(
+                            currentTableData.summaryFormulas
+                        )
+                            ? currentTableData.summaryFormulas
+                            : [];
+
+                    summaries.forEach(
+                        function (summary, summaryIndex) {
+                            const targetColumnIndex =
+                                headers.indexOf(
+                                    summary.targetColumn
+                                );
+
+                            if (targetColumnIndex === -1) {
+                                return;
+                            }
+
+                            const summaryRowIndex =
+                                dataRowCount +
+                                2 +
+                                summaryIndex;
+
+                            const labelCell =
+                                sheet.getCell(
+                                    summaryRowIndex,
+                                    0
+                                );
+
+                            const valueCell =
+                                sheet.getCell(
+                                    summaryRowIndex,
+                                    targetColumnIndex
+                                );
+
+                            labelCell.values = [[
+                                summary.label ||
+                                "Indicateur"
+                            ]];
+
+                            labelCell.format.font.bold =
+                                true;
+
+                            labelCell.format.fill.color =
+                                "#E2F0D9";
+
+                            valueCell.formulas = [[
+                                normalizeExcelFormula(
+                                    summary.formula,
+                                    {
+                                        lastRow:
+                                            dataRowCount + 1
+                                    }
+                                )
+                            ]];
+
+                            valueCell.format.font.bold =
+                                true;
+
+                            valueCell.format.fill.color =
+                                "#E2F0D9";
+
+                            valueCell.numberFormat = [[
+                                excelNumberFormatForType(
+                                    currentTableData.columns[
+                                        targetColumnIndex
+                                    ]?.type
+                                )
+                            ]];
+                        }
+                    );
+
+                    const finalRange =
+                        sheet.getUsedRange();
+
+                    finalRange.format.autofitColumns();
+                    finalRange.format.autofitRows();
 
                     await context.sync();
                 }
             );
 
             statusText.textContent =
-                "✅ Tableau inséré dans Excel.";
+                "✅ Véritable tableau Excel créé avec filtres, style et formules.";
 
         } catch (error) {
 
             console.error(error);
 
             statusText.textContent =
-                "❌ Impossible d'insérer le tableau dans Excel.";
+                "❌ Impossible de créer le tableau Excel : " +
+                (error?.message || "erreur inconnue");
         }
 
         insertExcelButton.disabled =

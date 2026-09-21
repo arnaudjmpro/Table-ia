@@ -1,44 +1,122 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-
 <OfficeApp
     xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+    xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
     xsi:type="TaskPaneApp">
 
     <Id>4c1d81f2-3ca3-4a2c-9c35-4d8c1df1a741</Id>
+    <Version>1.1.0.0</Version>
+    <ProviderName>AJM Développement</ProviderName>
+    <DefaultLocale>fr-FR</DefaultLocale>
 
-    <Version>1.0.0.0</Version>
+    <DisplayName DefaultValue="TableIA" />
+    <Description DefaultValue="Transformez une photo ou une demande en tableau Excel structuré grâce à l'intelligence artificielle." />
 
-    <ProviderName>
-        AJM Développement
-    </ProviderName>
+    <IconUrl DefaultValue="https://arnaudjmpro.github.io/Table-ia/tableia-icon-32.png" />
+    <HighResolutionIconUrl DefaultValue="https://arnaudjmpro.github.io/Table-ia/tableia-icon-80.png" />
+    <SupportUrl DefaultValue="https://arnaudjmpro.github.io/Table-ia/assistance.html" />
 
-    <DefaultLocale>
-        fr-FR
-    </DefaultLocale>
-
-    <DisplayName
-        DefaultValue="TableIA"
-    />
-
-    <Description
-        DefaultValue="Transformez une photo brute en tableau Excel structuré grâce à l'intelligence artificielle."
-    />
+    <AppDomains>
+        <AppDomain>https://arnaudjmpro.github.io</AppDomain>
+    </AppDomains>
 
     <Hosts>
-        <Host Name="Workbook"/>
+        <Host Name="Workbook" />
     </Hosts>
 
+    <Requirements>
+        <Sets DefaultMinVersion="1.1">
+            <Set Name="ExcelApi" MinVersion="1.1" />
+        </Sets>
+    </Requirements>
+
     <DefaultSettings>
-
-        <SourceLocation
-            DefaultValue="https://arnaudjmpro.github.io/Table-ia/"
-        />
-
+        <SourceLocation DefaultValue="https://arnaudjmpro.github.io/Table-ia/" />
     </DefaultSettings>
 
-    <Permissions>
-        ReadWriteDocument
-    </Permissions>
+    <Permissions>ReadWriteDocument</Permissions>
 
+    <VersionOverrides
+        xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
+        xsi:type="VersionOverridesV1_0">
+
+        <Requirements>
+            <bt:Sets DefaultMinVersion="1.1">
+                <bt:Set Name="ExcelApi" MinVersion="1.1" />
+            </bt:Sets>
+        </Requirements>
+
+        <Hosts>
+            <Host xsi:type="Workbook">
+                <DesktopFormFactor>
+                    <GetStarted>
+                        <Title resid="TableIA.GetStarted.Title" />
+                        <Description resid="TableIA.GetStarted.Description" />
+                        <LearnMoreUrl resid="TableIA.Support.Url" />
+                    </GetStarted>
+
+                    <FunctionFile resid="TableIA.Taskpane.Url" />
+
+                    <ExtensionPoint xsi:type="PrimaryCommandSurface">
+                        <OfficeTab id="TabHome">
+                            <Group id="TableIA.CommandsGroup">
+                                <Label resid="TableIA.CommandsGroup.Label" />
+                                <Icon>
+                                    <bt:Image size="16" resid="TableIA.Icon.16" />
+                                    <bt:Image size="32" resid="TableIA.Icon.32" />
+                                    <bt:Image size="48" resid="TableIA.Icon.48" />
+                                    <bt:Image size="80" resid="TableIA.Icon.80" />
+                                </Icon>
+
+                                <Control xsi:type="Button" id="TableIA.OpenTaskpaneButton">
+                                    <Label resid="TableIA.OpenTaskpaneButton.Label" />
+                                    <Supertip>
+                                        <Title resid="TableIA.OpenTaskpaneButton.Label" />
+                                        <Description resid="TableIA.OpenTaskpaneButton.Tooltip" />
+                                    </Supertip>
+                                    <Icon>
+                                        <bt:Image size="16" resid="TableIA.Icon.16" />
+                                        <bt:Image size="32" resid="TableIA.Icon.32" />
+                                        <bt:Image size="48" resid="TableIA.Icon.48" />
+                                        <bt:Image size="80" resid="TableIA.Icon.80" />
+                                    </Icon>
+                                    <Action xsi:type="ShowTaskpane">
+                                        <TaskpaneId>TableIA.Taskpane</TaskpaneId>
+                                        <SourceLocation resid="TableIA.Taskpane.Url" />
+                                    </Action>
+                                </Control>
+                            </Group>
+                        </OfficeTab>
+                    </ExtensionPoint>
+                </DesktopFormFactor>
+            </Host>
+        </Hosts>
+
+        <Resources>
+            <bt:Images>
+                <bt:Image id="TableIA.Icon.16" DefaultValue="https://arnaudjmpro.github.io/Table-ia/tableia-icon-16.png" />
+                <bt:Image id="TableIA.Icon.32" DefaultValue="https://arnaudjmpro.github.io/Table-ia/tableia-icon-32.png" />
+                <bt:Image id="TableIA.Icon.48" DefaultValue="https://arnaudjmpro.github.io/Table-ia/tableia-icon-48.png" />
+                <bt:Image id="TableIA.Icon.80" DefaultValue="https://arnaudjmpro.github.io/Table-ia/tableia-icon-80.png" />
+            </bt:Images>
+
+            <bt:Urls>
+                <bt:Url id="TableIA.Taskpane.Url" DefaultValue="https://arnaudjmpro.github.io/Table-ia/" />
+                <bt:Url id="TableIA.Support.Url" DefaultValue="https://arnaudjmpro.github.io/Table-ia/assistance.html" />
+            </bt:Urls>
+
+            <bt:ShortStrings>
+                <bt:String id="TableIA.GetStarted.Title" DefaultValue="TableIA est prêt" />
+                <bt:String id="TableIA.CommandsGroup.Label" DefaultValue="TableIA" />
+                <bt:String id="TableIA.OpenTaskpaneButton.Label" DefaultValue="Ouvrir TableIA" />
+            </bt:ShortStrings>
+
+            <bt:LongStrings>
+                <bt:String id="TableIA.GetStarted.Description" DefaultValue="Ouvrez TableIA depuis l'onglet Accueil pour créer un tableau Excel à partir d'une demande ou d'une photo." />
+                <bt:String id="TableIA.OpenTaskpaneButton.Tooltip" DefaultValue="Ouvre TableIA dans un panneau latéral pour créer ou modifier un tableau Excel avec l'intelligence artificielle." />
+            </bt:LongStrings>
+        </Resources>
+    </VersionOverrides>
 </OfficeApp>

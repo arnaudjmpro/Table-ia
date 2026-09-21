@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+    <title>Caméra TableIA</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            background: #f4f7fb;
+            color: #1f2937;
+            font-family: Arial, sans-serif;
+        }
+
+        .dialog-card {
+            width: 100%;
+            max-width: 520px;
+            padding: 18px;
+            border-radius: 18px;
+            background: #ffffff;
+            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.14);
+            text-align: center;
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-size: 22px;
+        }
+
+        #message {
+            min-height: 40px;
+            margin: 0 0 12px;
+            color: #4b5563;
+            line-height: 1.35;
+        }
+
+        video {
+            display: none;
+            width: 100%;
+            max-height: 48vh;
+            margin: 0 0 12px;
+            border-radius: 12px;
+            background: #111827;
+            object-fit: contain;
+        }
+
+        .actions {
+            display: grid;
+            gap: 10px;
+        }
+
+        button {
+            width: 100%;
+            min-height: 50px;
+            border: 0;
+            border-radius: 12px;
+            background: #138a47;
+            color: #ffffff;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            cursor: default;
+            opacity: 0.55;
+        }
+
+        .privacy {
+            margin: 12px 0 0;
+            color: #6b7280;
+            font-size: 12px;
+            line-height: 1.35;
+        }
+
+        canvas {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <main class="dialog-card">
+        <h1>📷 Photo TableIA</h1>
+
+        <p id="message">
+            Activez la caméra, puis photographiez votre document.
+        </p>
+
+        <video
+            id="cameraPreview"
+            autoplay
+            muted
+            playsinline
+        ></video>
+
+        <canvas id="photoCanvas"></canvas>
+
+        <div class="actions">
+            <button id="startCameraButton" type="button">
+                📷 ACTIVER LA CAMÉRA
+            </button>
+
+            <button id="takePhotoButton" type="button" disabled>
+                ✅ PRENDRE LA PHOTO
+            </button>
+        </div>
+
+        <p class="privacy">
+            La photo est utilisée uniquement pour créer votre tableau.
+        </p>
+    </main>
+
+    <script src="https://officeapis.public.onecdn.static.microsoft/1/office.js"></script>
+    <script>
+        const cameraPreview =
+            document.getElementById("cameraPreview");
+
+        const photoCanvas =
+            document.getElementById("photoCanvas");
+
+        const startCameraButton =
+            document.getElementById("startCameraButton");
+
+        const takePhotoButton =
+            document.getElementById("takePhotoButton");
+
+        const message =
+            document.getElementById("message");
+
+        let cameraStream = null;
+        let officeReady = false;
+
+        function stopCamera() {
+            if (!cameraStream) {
+                return;
+            }
+
+            cameraStream.getTracks().forEach(
+                function (track) {
+                    track.stop();
+                }
+            );
+
+            cameraStream = null;
+        }
+
+        function cameraErrorMessage(error) {
+            const messages = {
+                NotAllowedError:
+                    "L'accès à la caméra a été refusé. Autorisez-le dans Safari puis réessayez.",
+                NotFoundError:
+                    "Aucune caméra n'a été détectée sur cet appareil.",
+                NotReadableError:
+                    "La caméra est déjà utilisée par une autre application.",
+                OverconstrainedError:
+                    "La caméra ne prend pas en charge les réglages demandés.",
+                SecurityError:
+                    "Le navigateur a bloqué l'accès sécurisé à la caméra."
+            };
+
+            return messages[error?.name] ||
+                error?.message ||
+                "Impossible d'activer la caméra.";
+        }
+
+        function sendToTableIA(payload) {
+            if (
+                typeof Office === "undefined" ||
+                !Office.context ||
+                !Office.context.ui ||
+                typeof Office.context.ui.messageParent !== "function"
+            ) {
+                throw new Error(
+                    "La communication avec Excel n'est pas disponible."
+                );
+            }
+
+            Office.context.ui.messageParent(
+                JSON.stringify(payload)
+            );
+        }
+
+        function showError(error) {
+            const errorText =
+                cameraErrorMessage(error);
+
+            message.textContent =
+                "❌ " + errorText;
+
+            startCameraButton.disabled =
+                false;
+
+            startCameraButton.textContent =
+                "📷 RÉESSAYER";
+
+            takePhotoButton.disabled =
+                true;
+        }
+
+        if (typeof Office !== "undefined") {
+            Office.onReady()
+                .then(function () {
+                    officeReady = true;
+                })
+                .catch(function () {
+                    showError(
+                        new Error(
+                            "La fenêtre photo ne peut pas communiquer avec Excel."
+                        )
+                    );
+                });
+        }
+
+        if (
+            !navigator.mediaDevices ||
+            typeof navigator.mediaDevices.getUserMedia !== "function"
+        ) {
+            startCameraButton.disabled =
+                true;
+
+            message.textContent =
+                "❌ La caméra n'est pas disponible dans ce navigateur.";
+        }
+
+        startCameraButton.addEventListener(
+            "click",
+            async function () {
+                if (!officeReady) {
+                    showError(
+                        new Error(
+                            "Excel termine l'ouverture de la fenêtre. Réessayez dans une seconde."
+                        )
+                    );
+                    return;
+                }
+
+                startCameraButton.disabled =
+                    true;
+
+                startCameraButton.textContent =
+                    "⏳ ACTIVATION...";
+
+                message.textContent =
+                    "Autorisez l'accès à la caméra si Safari le demande.";
+
+                stopCamera();
+
+                try {
+                    cameraStream =
+                        await navigator.mediaDevices.getUserMedia({
+                            audio: false,
+                            video: {
+                                facingMode: {
+                                    ideal: "environment"
+                                },
+                                width: {
+                                    ideal: 1920
+                                },
+                                height: {
+                                    ideal: 1080
+                                }
+                            }
+                        });
+
+                    cameraPreview.srcObject =
+                        cameraStream;
+
+                    cameraPreview.style.display =
+                        "block";
+
+                    await cameraPreview.play();
+
+                    message.textContent =
+                        "Cadrez le document puis prenez la photo.";
+
+                    startCameraButton.textContent =
+                        "📷 CAMÉRA ACTIVE";
+
+                    takePhotoButton.disabled =
+                        false;
+                } catch (error) {
+                    stopCamera();
+                    showError(error);
+                }
+            }
+        );
+
+        takePhotoButton.addEventListener(
+            "click",
+            function () {
+                if (
+                    !cameraStream ||
+                    !cameraPreview.videoWidth ||
+                    !cameraPreview.videoHeight
+                ) {
+                    showError(
+                        new Error(
+                            "La caméra n'est pas encore prête."
+                        )
+                    );
+                    return;
+                }
+
+                takePhotoButton.disabled =
+                    true;
+
+                message.textContent =
+                    "⏳ Préparation de la photo...";
+
+                const maxSize =
+                    1600;
+
+                const ratio =
+                    Math.min(
+                        1,
+                        maxSize / cameraPreview.videoWidth,
+                        maxSize / cameraPreview.videoHeight
+                    );
+
+                photoCanvas.width =
+                    Math.round(
+                        cameraPreview.videoWidth * ratio
+                    );
+
+                photoCanvas.height =
+                    Math.round(
+                        cameraPreview.videoHeight * ratio
+                    );
+
+                const context =
+                    photoCanvas.getContext("2d");
+
+                context.drawImage(
+                    cameraPreview,
+                    0,
+                    0,
+                    photoCanvas.width,
+                    photoCanvas.height
+                );
+
+                const dataUrl =
+                    photoCanvas.toDataURL(
+                        "image/jpeg",
+                        0.82
+                    );
+
+                stopCamera();
+
+                message.textContent =
+                    "✅ Photo prise en compte.";
+
+                try {
+                    sendToTableIA({
+                        type: "tableia-camera-photo",
+                        dataUrl: dataUrl
+                    });
+                } catch (error) {
+                    showError(error);
+                }
+            }
+        );
+
+        window.addEventListener(
+            "beforeunload",
+            stopCamera
+        );
+    </script>
+</body>
+</html>

@@ -19,6 +19,9 @@ const clearPromptButton =
 const cameraInput =
     document.getElementById("cameraInput");
 
+const cameraButton =
+    document.getElementById("cameraButton");
+
 const galleryInput =
     document.getElementById("galleryInput");;
 
@@ -45,6 +48,15 @@ const insertExcelButton =
 
 const isEmbeddedInOffice =
     window.self !== window.top;
+
+const isMobileCaptureDevice =
+    /Android|iPhone|iPad|iPod/i.test(
+        navigator.userAgent
+    ) ||
+    (
+        navigator.platform === "MacIntel" &&
+        navigator.maxTouchPoints > 1
+    );
 
 let officeReadyInfo = null;
 let officeReadyError = null;
@@ -91,6 +103,7 @@ clearPromptButton.style.display =
 let selectedPhoto = null;
 let currentTableData = null;
 let previousTableData = null;
+let cameraDialog = null;
 
 // ==========================================
 // DICTÉE VOCALE
@@ -691,6 +704,190 @@ clearPromptButton.style.display =
 // PHOTO
 // ==========================================
 
+function dataUrlToPhotoFile(dataUrl) {
+    const parts =
+        String(dataUrl || "").split(",");
+
+    if (
+        parts.length !== 2 ||
+        !parts[0].startsWith("data:image/")
+    ) {
+        throw new Error(
+            "La photo reçue n'est pas valide."
+        );
+    }
+
+    const mimeMatch =
+        parts[0].match(/^data:(image\/[a-zA-Z0-9.+-]+);base64$/);
+
+    if (!mimeMatch) {
+        throw new Error(
+            "Le format de la photo n'est pas reconnu."
+        );
+    }
+
+    const binary =
+        atob(parts[1]);
+
+    const bytes =
+        new Uint8Array(binary.length);
+
+    for (
+        let index = 0;
+        index < binary.length;
+        index += 1
+    ) {
+        bytes[index] =
+            binary.charCodeAt(index);
+    }
+
+    return new File(
+        [bytes],
+        "photo-tableia.jpg",
+        {
+            type: mimeMatch[1],
+            lastModified: Date.now()
+        }
+    );
+}
+
+function openOfficeCameraDialog() {
+    if (
+        typeof Office === "undefined" ||
+        !Office.context ||
+        !Office.context.ui ||
+        typeof Office.context.ui.displayDialogAsync !== "function"
+    ) {
+        throw new Error(
+            "La fenêtre sécurisée de prise de photo n'est pas disponible dans cette version d'Excel."
+        );
+    }
+
+    if (cameraDialog) {
+        return;
+    }
+
+    const dialogUrl =
+        new URL(
+            "dialog-camera.html",
+            window.location.href
+        ).href;
+
+    statusText.textContent =
+        "Ouverture de la caméra du Mac...";
+
+    Office.context.ui.displayDialogAsync(
+        dialogUrl,
+        {
+            height: 48,
+            width: 38,
+            displayInIframe: false
+        },
+        function (asyncResult) {
+            if (
+                asyncResult.status !==
+                Office.AsyncResultStatus.Succeeded
+            ) {
+                statusText.textContent =
+                    "❌ Ouverture de la caméra impossible : " +
+                    (
+                        asyncResult.error?.message ||
+                        "erreur inconnue"
+                    );
+                return;
+            }
+
+            const activeDialog =
+                asyncResult.value;
+
+            cameraDialog =
+                activeDialog;
+
+            let photoReceived =
+                false;
+
+            statusText.textContent =
+                "📷 Activez la caméra dans la petite fenêtre.";
+
+            activeDialog.addEventHandler(
+                Office.EventType.DialogMessageReceived,
+                function (event) {
+                    try {
+                        const payload =
+                            JSON.parse(event.message);
+
+                        if (
+                            payload.type ===
+                            "tableia-camera-error"
+                        ) {
+                            throw new Error(
+                                payload.message ||
+                                "La caméra n'est pas disponible."
+                            );
+                        }
+
+                        if (
+                            payload.type !==
+                            "tableia-camera-photo"
+                        ) {
+                            throw new Error(
+                                "Réponse de la caméra non reconnue."
+                            );
+                        }
+
+                        const photoFile =
+                            dataUrlToPhotoFile(
+                                payload.dataUrl
+                            );
+
+                        photoReceived =
+                            true;
+
+                        handleSelectedPhoto(
+                            photoFile
+                        );
+
+                        activeDialog.close();
+
+                        if (
+                            cameraDialog ===
+                            activeDialog
+                        ) {
+                            cameraDialog =
+                                null;
+                        }
+                    } catch (error) {
+                        statusText.textContent =
+                            "❌ Photo : " +
+                            (
+                                error?.message ||
+                                "réception impossible"
+                            );
+                    }
+                }
+            );
+
+            activeDialog.addEventHandler(
+                Office.EventType.DialogEventReceived,
+                function () {
+                    if (
+                        cameraDialog ===
+                        activeDialog
+                    ) {
+                        cameraDialog =
+                            null;
+                    }
+
+                    if (!photoReceived) {
+                        statusText.textContent =
+                            "Prise de photo fermée sans ajouter d'image.";
+                    }
+                }
+            );
+        }
+    );
+}
+
 function handleSelectedPhoto(file) {
 
     if (!file) {
@@ -715,6 +912,38 @@ clearPromptButton.style.display =
     statusText.textContent =
         "📷 Photo prise en compte. Prête pour l'analyse.";
 }
+
+
+cameraButton.addEventListener(
+    "click",
+    function (event) {
+        // Sur téléphone et tablette, le champ capture natif reste
+        // la solution la plus directe et déjà validée.
+        if (
+            isMobileCaptureDevice ||
+            !isEmbeddedInOffice
+        ) {
+            return;
+        }
+
+        // Sur Mac et PC, l'attribut capture ouvre généralement le
+        // sélecteur de fichiers. Une vraie fenêtre webcam est donc utilisée.
+        event.preventDefault();
+
+        try {
+            openOfficeCameraDialog();
+        } catch (error) {
+            console.error(error);
+
+            statusText.textContent =
+                "❌ Photo : " +
+                (
+                    error?.message ||
+                    "ouverture impossible"
+                );
+        }
+    }
+);
 
 
 cameraInput.addEventListener(

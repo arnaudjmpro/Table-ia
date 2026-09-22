@@ -15,7 +15,7 @@
     <Description DefaultValue="Transformez une photo ou une demande en tableau Excel structuré grâce à l'intelligence artificielle." />
 
     <IconUrl DefaultValue="https://arnaudjmpro.github.io/Table-ia/tableia-icon-32.png" />
-    <HighResolutionIconUrl DefaultValue="https://arnaudjmpro.github.io/Table-ia/tableia-icon-80.png" />
+    <HighResolutionIconUrl DefaultValue="https://arnaudjmpro.github.io/Table-ia/tableia-icon-64.png" />
     <SupportUrl DefaultValue="https://arnaudjmpro.github.io/Table-ia/assistance.html" />
 
     <AppDomains>
@@ -74,7 +74,7 @@
                                     <Label resid="TableIA.OpenTaskpaneButton.Label" />
                                     <Supertip>
                                         <Title resid="TableIA.OpenTaskpaneButton.Label" />
-                                        <Description resid="TableIA.OpenTaskpaneButton.Tooltip" />
+                                        <Description resid="TableIA.OpenButton.Tooltip" />
                                     </Supertip>
                                     <Icon>
                                         <bt:Image size="16" resid="TableIA.Icon.16" />
@@ -115,7 +115,7 @@
 
             <bt:LongStrings>
                 <bt:String id="TableIA.GetStarted.Description" DefaultValue="Ouvrez TableIA depuis l'onglet Accueil pour créer un tableau Excel à partir d'une demande ou d'une photo." />
-                <bt:String id="TableIA.OpenTaskpaneButton.Tooltip" DefaultValue="Ouvre TableIA dans un panneau latéral pour créer ou modifier un tableau Excel avec l'intelligence artificielle." />
+                <bt:String id="TableIA.OpenButton.Tooltip" DefaultValue="Ouvre TableIA dans un panneau latéral pour créer ou modifier un tableau Excel avec l'intelligence artificielle." />
             </bt:LongStrings>
         </Resources>
     </VersionOverrides>

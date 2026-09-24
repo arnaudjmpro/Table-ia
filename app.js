@@ -324,8 +324,7 @@ if (SpeechRecognition || isEmbeddedInOffice) {
         newRecognition.interimResults =
             false;
 
-        newRecognition.continuous =
-            false;
+        newRecognition.continuous = true;
 
         newRecognition.addEventListener(
             "start",

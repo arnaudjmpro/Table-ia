@@ -157,6 +157,7 @@
         }
 
         function cameraErrorMessage(error) {
+      return (error?.name || "Erreur") + " : " + (error?.message || "sans détail");
             const messages = {
                 NotAllowedError:
                     "L'accès à la caméra a été refusé. Autorisez-le dans Safari puis réessayez.",
@@ -237,7 +238,7 @@
         startCameraButton.addEventListener(
             "click",
             async function () {
-                if (!officeReady) {
+                if (!officeReady && !new URLSearchParams(window.location.search).has("standalone")) {
                     showError(
                         new Error(
                             "Excel termine l'ouverture de la fenêtre. Réessayez dans une seconde."
@@ -260,18 +261,7 @@
                 try {
                     cameraStream =
                         await navigator.mediaDevices.getUserMedia({
-                            audio: false,
-                            video: {
-                                facingMode: {
-                                    ideal: "environment"
-                                },
-                                width: {
-                                    ideal: 1920
-                                },
-                                height: {
-                                    ideal: 1080
-                                }
-                            }
+                            video: {}
                         });
 
                     cameraPreview.srcObject =

@@ -768,7 +768,7 @@ function openOfficeCameraDialog() {
 
     const dialogUrl =
         new URL(
-            "dialog-camera.html",
+            "dialog-camera.html?v=20260926-4",
             window.location.href
         ).href;
 
@@ -918,10 +918,7 @@ cameraButton.addEventListener(
     function (event) {
         // Sur téléphone et tablette, le champ capture natif reste
         // la solution la plus directe et déjà validée.
-        if (
-            isMobileCaptureDevice ||
-            !isEmbeddedInOffice
-        ) {
+        if (isMobileCaptureDevice) {
             return;
         }
 

@@ -29,3 +29,7 @@ revoke all
 
 comment on table public.tableia_photo_sessions is
     'Relais temporaire et à lecture unique pour les photos TableIA.';
+
+grant select, insert, update, delete
+    on table public.tableia_photo_sessions
+    to service_role;

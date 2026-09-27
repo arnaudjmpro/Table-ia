@@ -139,8 +139,27 @@
         const message =
             document.getElementById("message");
 
+        const queryParameters =
+            new URLSearchParams(window.location.search);
+
+        const externalMode =
+            queryParameters.get("external") === "1";
+
+        const standaloneMode =
+            queryParameters.has("standalone");
+
+        const externalSessionId =
+            queryParameters.get("session") || "";
+
+        const PHOTO_BRIDGE_FUNCTION_URL =
+            "https://ctihdqybwmymalpkjkov.supabase.co/functions/v1/tableia-photo-bridge";
+
+        const SUPABASE_PUBLISHABLE_KEY =
+            "sb_publishable_LU68bB5ip1OEPr8DJnjJJg_G36GmXoY";
+
         let cameraStream = null;
-        let officeReady = false;
+        let officeReady =
+            externalMode || standaloneMode;
 
         function stopCamera() {
             if (!cameraStream) {
@@ -157,7 +176,6 @@
         }
 
         function cameraErrorMessage(error) {
-      return (error?.name || "Erreur") + " : " + (error?.message || "sans détail");
             const messages = {
                 NotAllowedError:
                     "L'accès à la caméra a été refusé. Autorisez-le dans Safari puis réessayez.",
@@ -176,7 +194,71 @@
                 "Impossible d'activer la caméra.";
         }
 
-        function sendToTableIA(payload) {
+        async function sendToTableIA(payload) {
+            if (externalMode) {
+                if (
+                    !/^[a-f0-9]{64}$/.test(
+                        externalSessionId
+                    )
+                ) {
+                    throw new Error(
+                        "La session photo n'est pas valide. Retournez dans Excel et recommencez."
+                    );
+                }
+
+                const dataUrlParts =
+                    String(payload.dataUrl || "")
+                        .match(/^data:(image\/(?:jpeg|png|webp));base64,(.+)$/);
+
+                if (!dataUrlParts) {
+                    throw new Error(
+                        "La photo préparée n'est pas valide."
+                    );
+                }
+
+                const response =
+                    await fetch(
+                        PHOTO_BRIDGE_FUNCTION_URL,
+                        {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json",
+                                apikey:
+                                    SUPABASE_PUBLISHABLE_KEY,
+                                Authorization:
+                                    `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
+                            },
+                            body: JSON.stringify({
+                                action: "upload",
+                                sessionId:
+                                    externalSessionId,
+                                imageMimeType:
+                                    dataUrlParts[1],
+                                imageBase64:
+                                    dataUrlParts[2]
+                            })
+                        }
+                    );
+
+                let result = {};
+
+                try {
+                    result =
+                        await response.json();
+                } catch (_) {
+                    result = {};
+                }
+
+                if (!response.ok) {
+                    throw new Error(
+                        result.error ||
+                        "La photo n'a pas pu être transmise à Excel."
+                    );
+                }
+
+                return;
+            }
+
             if (
                 typeof Office === "undefined" ||
                 !Office.context ||
@@ -210,7 +292,11 @@
                 true;
         }
 
-        if (typeof Office !== "undefined") {
+        if (
+            !externalMode &&
+            !standaloneMode &&
+            typeof Office !== "undefined"
+        ) {
             Office.onReady()
                 .then(function () {
                     officeReady = true;
@@ -235,10 +321,23 @@
                 "❌ La caméra n'est pas disponible dans ce navigateur.";
         }
 
+        if (
+            externalMode &&
+            !/^[a-f0-9]{64}$/.test(
+                externalSessionId
+            )
+        ) {
+            startCameraButton.disabled =
+                true;
+
+            message.textContent =
+                "❌ Session photo invalide. Retournez dans Excel et appuyez de nouveau sur Prendre une photo.";
+        }
+
         startCameraButton.addEventListener(
             "click",
             async function () {
-                if (!officeReady && !new URLSearchParams(window.location.search).has("standalone")) {
+                if (!officeReady) {
                     showError(
                         new Error(
                             "Excel termine l'ouverture de la fenêtre. Réessayez dans une seconde."
@@ -289,7 +388,7 @@
 
         takePhotoButton.addEventListener(
             "click",
-            function () {
+            async function () {
                 if (
                     !cameraStream ||
                     !cameraPreview.videoWidth ||
@@ -348,14 +447,24 @@
 
                 stopCamera();
 
-                message.textContent =
-                    "✅ Photo prise en compte.";
-
                 try {
-                    sendToTableIA({
+                    await sendToTableIA({
                         type: "tableia-camera-photo",
                         dataUrl: dataUrl
                     });
+
+                    message.textContent =
+                        externalMode
+                            ? "✅ Photo transmise à TableIA. Vous pouvez fermer cette page et revenir dans Excel."
+                            : "✅ Photo prise en compte.";
+
+                    if (externalMode) {
+                        startCameraButton.style.display =
+                            "none";
+
+                        takePhotoButton.style.display =
+                            "none";
+                    }
                 } catch (error) {
                     showError(error);
                 }

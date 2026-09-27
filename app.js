@@ -4,6 +4,18 @@ const SUPABASE_FUNCTION_URL =
 const SUPABASE_PUBLISHABLE_KEY =
     "sb_publishable_LU68bB5ip1OEPr8DJnjJJg_G36GmXoY";
 
+const PHOTO_BRIDGE_FUNCTION_URL =
+    SUPABASE_FUNCTION_URL.replace(
+        /tableia-ai$/,
+        "tableia-photo-bridge"
+    );
+
+const PHOTO_SESSION_TTL_MS =
+    10 * 60 * 1000;
+
+const PHOTO_POLL_INTERVAL_MS =
+    1500;
+
 const textPrompt =
     document.getElementById("textPrompt");
 
@@ -103,7 +115,8 @@ clearPromptButton.style.display =
 let selectedPhoto = null;
 let currentTableData = null;
 let previousTableData = null;
-let cameraDialog = null;
+let activePhotoSession = null;
+let photoPollTimer = null;
 
 // ==========================================
 // DICTÉE VOCALE
@@ -750,141 +763,232 @@ function dataUrlToPhotoFile(dataUrl) {
     );
 }
 
-function openOfficeCameraDialog() {
-    if (
-        typeof Office === "undefined" ||
-        !Office.context ||
-        !Office.context.ui ||
-        typeof Office.context.ui.displayDialogAsync !== "function"
-    ) {
+function createSecurePhotoSessionId() {
+    const randomBytes =
+        new Uint8Array(32);
+
+    crypto.getRandomValues(
+        randomBytes
+    );
+
+    return Array.from(randomBytes)
+        .map(function (value) {
+            return value
+                .toString(16)
+                .padStart(2, "0");
+        })
+        .join("");
+}
+
+async function callPhotoBridge(payload) {
+    const response =
+        await fetch(
+            PHOTO_BRIDGE_FUNCTION_URL,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    apikey:
+                        SUPABASE_PUBLISHABLE_KEY,
+                    Authorization:
+                        `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
+                },
+                body: JSON.stringify(payload)
+            }
+        );
+
+    let data = {};
+
+    try {
+        data = await response.json();
+    } catch (_) {
+        data = {};
+    }
+
+    if (!response.ok) {
         throw new Error(
-            "La fenêtre sécurisée de prise de photo n'est pas disponible dans cette version d'Excel."
+            data.error ||
+            "Le relais photo ne répond pas."
         );
     }
 
-    if (cameraDialog) {
+    return data;
+}
+
+function clearPhotoPolling() {
+    if (photoPollTimer) {
+        clearTimeout(photoPollTimer);
+        photoPollTimer = null;
+    }
+}
+
+function stopPhotoSession(
+    cancelRemote = false
+) {
+    const session =
+        activePhotoSession;
+
+    activePhotoSession = null;
+    clearPhotoPolling();
+
+    if (cancelRemote && session) {
+        callPhotoBridge({
+            action: "cancel",
+            sessionId: session.id
+        }).catch(function () {
+            // La session expirera automatiquement si le réseau est indisponible.
+        });
+    }
+}
+
+async function pollPhotoSession(sessionId) {
+    if (
+        !activePhotoSession ||
+        activePhotoSession.id !== sessionId
+    ) {
         return;
     }
 
-    const dialogUrl =
+    if (
+        Date.now() >
+        activePhotoSession.expiresAt
+    ) {
+        stopPhotoSession(true);
+        statusText.textContent =
+            "La prise de photo a expiré. Appuyez de nouveau sur le bouton.";
+        return;
+    }
+
+    try {
+        const result =
+            await callPhotoBridge({
+                action: "poll",
+                sessionId: sessionId
+            });
+
+        if (
+            result.status === "ready" &&
+            result.imageBase64 &&
+            result.imageMimeType
+        ) {
+            const dataUrl =
+                `data:${result.imageMimeType};base64,${result.imageBase64}`;
+
+            const photoFile =
+                dataUrlToPhotoFile(dataUrl);
+
+            stopPhotoSession(false);
+            handleSelectedPhoto(photoFile);
+            return;
+        }
+    } catch (error) {
+        console.warn(
+            "Relais photo temporairement indisponible.",
+            error
+        );
+    }
+
+    photoPollTimer =
+        setTimeout(
+            function () {
+                pollPhotoSession(sessionId);
+            },
+            PHOTO_POLL_INTERVAL_MS
+        );
+}
+
+function openExternalCameraCapture() {
+    if (
+        !window.crypto ||
+        typeof window.crypto.getRandomValues !== "function"
+    ) {
+        throw new Error(
+            "La connexion sécurisée nécessaire à la photo n'est pas disponible."
+        );
+    }
+
+    if (activePhotoSession) {
+        stopPhotoSession(true);
+    }
+
+    const sessionId =
+        createSecurePhotoSessionId();
+
+    const cameraUrl =
         new URL(
-            "dialog-camera.html?v=20260926-4",
+            "dialog-camera.html",
             window.location.href
-        ).href;
+        );
+
+    cameraUrl.searchParams.set(
+        "external",
+        "1"
+    );
+
+    cameraUrl.searchParams.set(
+        "session",
+        sessionId
+    );
+
+    cameraUrl.searchParams.set(
+        "v",
+        "20260927-1"
+    );
+
+    activePhotoSession = {
+        id: sessionId,
+        expiresAt:
+            Date.now() +
+            PHOTO_SESSION_TTL_MS
+    };
+
+    let opened = false;
+
+    if (
+        typeof Office !== "undefined" &&
+        Office.context &&
+        Office.context.ui &&
+        typeof Office.context.ui.openBrowserWindow === "function"
+    ) {
+        Office.context.ui.openBrowserWindow(
+            cameraUrl.href
+        );
+        opened = true;
+    } else {
+        const browserWindow =
+            window.open(
+                cameraUrl.href,
+                "_blank"
+            );
+
+        opened = Boolean(browserWindow);
+
+        if (browserWindow) {
+            browserWindow.opener = null;
+        }
+    }
+
+    if (!opened) {
+        stopPhotoSession(true);
+        throw new Error(
+            "Le navigateur a bloqué l'ouverture de la caméra."
+        );
+    }
 
     statusText.textContent =
-        "Ouverture de la caméra du Mac...";
+        "📷 La caméra est ouverte dans votre navigateur. Revenez ici après la photo.";
 
-    Office.context.ui.displayDialogAsync(
-        dialogUrl,
-        {
-            height: 48,
-            width: 38,
-            displayInIframe: false
-        },
-        function (asyncResult) {
-            if (
-                asyncResult.status !==
-                Office.AsyncResultStatus.Succeeded
-            ) {
-                statusText.textContent =
-                    "❌ Ouverture de la caméra impossible : " +
-                    (
-                        asyncResult.error?.message ||
-                        "erreur inconnue"
-                    );
-                return;
-            }
+    callPhotoBridge({
+        action: "create",
+        sessionId: sessionId
+    }).catch(function (error) {
+        console.warn(
+            "Initialisation du relais photo retardée.",
+            error
+        );
+    });
 
-            const activeDialog =
-                asyncResult.value;
-
-            cameraDialog =
-                activeDialog;
-
-            let photoReceived =
-                false;
-
-            statusText.textContent =
-                "📷 Activez la caméra dans la petite fenêtre.";
-
-            activeDialog.addEventHandler(
-                Office.EventType.DialogMessageReceived,
-                function (event) {
-                    try {
-                        const payload =
-                            JSON.parse(event.message);
-
-                        if (
-                            payload.type ===
-                            "tableia-camera-error"
-                        ) {
-                            throw new Error(
-                                payload.message ||
-                                "La caméra n'est pas disponible."
-                            );
-                        }
-
-                        if (
-                            payload.type !==
-                            "tableia-camera-photo"
-                        ) {
-                            throw new Error(
-                                "Réponse de la caméra non reconnue."
-                            );
-                        }
-
-                        const photoFile =
-                            dataUrlToPhotoFile(
-                                payload.dataUrl
-                            );
-
-                        photoReceived =
-                            true;
-
-                        handleSelectedPhoto(
-                            photoFile
-                        );
-
-                        activeDialog.close();
-
-                        if (
-                            cameraDialog ===
-                            activeDialog
-                        ) {
-                            cameraDialog =
-                                null;
-                        }
-                    } catch (error) {
-                        statusText.textContent =
-                            "❌ Photo : " +
-                            (
-                                error?.message ||
-                                "réception impossible"
-                            );
-                    }
-                }
-            );
-
-            activeDialog.addEventHandler(
-                Office.EventType.DialogEventReceived,
-                function () {
-                    if (
-                        cameraDialog ===
-                        activeDialog
-                    ) {
-                        cameraDialog =
-                            null;
-                    }
-
-                    if (!photoReceived) {
-                        statusText.textContent =
-                            "Prise de photo fermée sans ajouter d'image.";
-                    }
-                }
-            );
-        }
-    );
+    pollPhotoSession(sessionId);
 }
 
 function handleSelectedPhoto(file) {
@@ -919,6 +1023,8 @@ cameraButton.addEventListener(
         // Sur téléphone et tablette, le champ capture natif reste
         // la solution la plus directe et déjà validée.
         if (isMobileCaptureDevice) {
+            event.preventDefault();
+            cameraInput.click();
             return;
         }
 
@@ -927,7 +1033,7 @@ cameraButton.addEventListener(
         event.preventDefault();
 
         try {
-            openOfficeCameraDialog();
+            openExternalCameraCapture();
         } catch (error) {
             console.error(error);
 

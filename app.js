@@ -1151,6 +1151,43 @@ setTimeout(
      });
  }
 
+ // V12 - Demander des opérations de modification à l'IA
+ async function requestExcelEditPlan(prompt, excelContext) {
+     const response = await fetch(
+         SUPABASE_FUNCTION_URL,
+         {
+             method: "POST",
+             headers: {
+                 "Content-Type": "application/json",
+                 "apikey": SUPABASE_PUBLISHABLE_KEY,
+                 "Authorization":
+                     `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
+             },
+             body: JSON.stringify({
+                 mode: "edit",
+                 prompt: prompt,
+                 excelContext: excelContext
+             })
+         }
+     );
+
+     const data = await response.json();
+
+     if (!response.ok) {
+         throw new Error(
+             data.error || "Erreur du moteur IA."
+         );
+     }
+
+     if (!data || !Array.isArray(data.operations)) {
+         throw new Error(
+             "Les instructions IA sont invalides."
+         );
+     }
+
+     return data.operations;
+ }
+
 async function modifyCurrentTable() {
 
     // V12 - Test sécurisé de lecture du tableau Excel

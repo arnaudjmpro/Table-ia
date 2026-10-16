@@ -102,6 +102,39 @@ const tableSchema = {
   },
 };
 
+
+const editSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["operations"],
+  properties: {
+    operations: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "action",
+          "address",
+          "columnName",
+          "value",
+          "formula"
+        ],
+        properties: {
+          action: {
+            type: "string",
+            enum: ["set_cell", "add_column"]
+          },
+          address: { type: "string" },
+          columnName: { type: "string" },
+          value: { type: "string" },
+          formula: { type: "string" }
+        }
+      }
+    }
+  }
+};
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", {

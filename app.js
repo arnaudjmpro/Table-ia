@@ -1108,6 +1108,40 @@ setTimeout(
 );
 async function modifyCurrentTable() {
 
+    // V12 - Modification directe d'une cellule Excel
+    const commande = textPrompt.value.trim().match(
+        /^remplace\s+(?:la\s+)?cellule\s+([A-Z]{1,3}[1-9]\d*)\s+par\s+(-?\d+(?:[.,]\d+)?)\.?$/i
+    );
+
+    if (commande) {
+        const adresse = commande[1].toUpperCase();
+        const valeur = Number(commande[2].replace(",", "."));
+
+        if (typeof Excel === "undefined") {
+            statusText.textContent = "Excel n'est pas disponible.";
+            return;
+        }
+
+        try {
+            await Excel.run(async function (context) {
+                const feuille = context.workbook.worksheets.getActiveWorksheet();
+                const cellule = feuille.getRange(adresse);
+
+                cellule.values = [[valeur]];
+                await context.sync();
+            });
+
+            statusText.textContent =
+                "✅ Cellule " + adresse + " modifiée dans Excel.";
+        } catch (erreur) {
+            console.error(erreur);
+            statusText.textContent =
+                "❌ Modification impossible : " + erreur.message;
+        }
+
+        return;
+    }
+
         if (!currentTableData) {
             statusText.textContent =
                 "Aucun tableau à modifier.";

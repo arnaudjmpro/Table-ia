@@ -449,6 +449,30 @@ if (prompt) {
                         });
                         }
 
+    // V12 - Transmission des données Excel actuelles
+    if (mode === "edit") {
+      if (
+        !excelContext ||
+        typeof excelContext !== "object" ||
+        Array.isArray(excelContext)
+      ) {
+        return jsonResponse(
+          {
+            error: "Contexte Excel obligatoire pour modifier le tableau",
+          },
+          400,
+        );
+      }
+
+      userContent.push({
+        type: "input_text",
+        text:
+          "Voici les données actuellement présentes dans Excel. " +
+          "Utilise ces informations comme référence pour la modification :\n" +
+          JSON.stringify(excelContext),
+      });
+    }
+    
                         if (imageBase64) {
                           userContent.push({
                               type: "input_image",

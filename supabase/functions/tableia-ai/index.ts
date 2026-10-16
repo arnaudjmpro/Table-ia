@@ -510,7 +510,7 @@ input: [
             content: [
                   {
                           type: "input_text",
-                                  text: instructions,
+text: mode === "edit" ? editInstructions : instructions,
                                         },
                                             ],
                                               },
@@ -523,11 +523,12 @@ input: [
             text: {
               format: {
                 type: "json_schema",
-                name: "tableia_tool",
-                description:
-                  "Structure d'un outil Excel généré par TableIA",
+                name: mode === "edit" ? "tableia_edit" : "tableia_tool",
+                description: mode === "edit"
+                  ? "Instructions de modification directe Excel"
+                  : "Structure d'un outil Excel généré par TableIA",
                 strict: true,
-                schema: tableSchema,
+                schema: mode === "edit" ? editSchema : tableSchema,
               },
             },
           }),

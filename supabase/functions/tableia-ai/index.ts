@@ -181,6 +181,14 @@ Deno.serve(async (req) => {
 
     const prompt =
       String(body?.prompt ?? "").trim();
+
+    // V12 - Distinction création / modification
+    const mode =
+      body?.mode === "edit" ? "edit" : "create";
+
+    const excelContext =
+      body?.excelContext ?? null;
+    
 const imageBase64 =
   String(body?.imageBase64 ?? "").trim();
 

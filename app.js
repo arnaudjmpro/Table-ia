@@ -1153,6 +1153,42 @@ setTimeout(
 
 async function modifyCurrentTable() {
 
+    // V12 - Test sécurisé de lecture du tableau Excel
+    if (
+        textPrompt.value.trim().toLowerCase() ===
+        "vérifie le tableau excel"
+    ) {
+        try {
+            const excelContext =
+                await readExcelContextForEdit();
+
+            const nombreLignes =
+                excelContext.values.length - 1;
+
+            const nombreColonnes =
+                excelContext.values[0].length;
+
+            statusText.textContent =
+                "✅ Lecture Excel réussie : " +
+                excelContext.tableName +
+                " (" + nombreLignes + " lignes, " +
+                nombreColonnes + " colonnes).";
+
+            console.log(
+                "TableIA - Contexte Excel lu :",
+                excelContext
+            );
+        } catch (error) {
+            console.error(error);
+
+            statusText.textContent =
+                "❌ Lecture Excel impossible : " +
+                error.message;
+        }
+
+        return;
+    }
+    
     // V12 - Modification directe d'une cellule Excel
     const commande = textPrompt.value.trim().match(
         /^remplace\s+(?:la\s+)?cellule\s+([A-Z]{1,3}[1-9]\d*)\s+par\s+(-?\d+(?:[.,]\d+)?)\.?$/i

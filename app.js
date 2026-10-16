@@ -1106,6 +1106,51 @@ setTimeout(
         
     }
 );
+
+ // V12 - Lecture du tableau Excel actuel
+ async function readExcelContextForEdit() {
+     if (typeof Excel === "undefined") {
+         throw new Error("Excel n'est pas disponible.");
+     }
+
+     return await Excel.run(async function (context) {
+         const sheet =
+             context.workbook.worksheets.getActiveWorksheet();
+
+         const tables = sheet.tables;
+         tables.load("items/name");
+
+         sheet.load("name");
+         await context.sync();
+
+         if (tables.items.length !== 1) {
+             throw new Error(
+                 "Sélectionne une feuille contenant exactement un tableau Excel."
+             );
+         }
+
+         const table = tables.items[0];
+         const range = table.getRange();
+
+         range.load("address,values,formulas,rowCount,columnCount");
+         await context.sync();
+
+         if (range.rowCount > 200 || range.columnCount > 30) {
+             throw new Error(
+                 "Tableau trop volumineux pour ce premier test."
+             );
+         }
+
+         return {
+             sheetName: sheet.name,
+             tableName: table.name,
+             address: range.address,
+             values: range.values,
+             formulas: range.formulas
+         };
+     });
+ }
+
 async function modifyCurrentTable() {
 
     // V12 - Modification directe d'une cellule Excel

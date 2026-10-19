@@ -1295,6 +1295,59 @@ setTimeout(
 
 async function modifyCurrentTable() {
 
+    // V12 - Test IA : modification d'une cellule
+    if (
+        textPrompt.value.trim().toLowerCase() ===
+        "teste modification clavier"
+    ) {
+        try {
+            const excelContext =
+                await readExcelContextForEdit();
+
+            const operations =
+                await requestExcelEditPlan(
+                    "Mets la quantité du clavier sans fil à 30.",
+                    excelContext
+                );
+
+            if (
+                operations.length !== 1 ||
+                operations[0].action !== "set_cell"
+            ) {
+                throw new Error(
+                    "L'IA n'a pas proposé une modification de cellule."
+                );
+            }
+
+            const operation = operations[0];
+
+            if (
+                String(operation.address ?? "").toUpperCase() !== "B2" ||
+                Number(operation.value) !== 30 ||
+                String(operation.formula ?? "").trim() !== ""
+            ) {
+                throw new Error(
+                    "L'IA n'a pas identifié correctement B2 et la valeur 30."
+                );
+            }
+
+            statusText.textContent =
+                "✅ Plan IA validé : cellule B2 → 30. " +
+                "Aucune modification effectuée.";
+
+            console.log(
+                "TableIA - Test modification cellule :",
+                operation
+            );
+
+        } catch (error) {
+            console.error(error);
+            statusText.textContent =
+                "❌ Test impossible : " + error.message;
+        }
+
+        return;
+    }
     
     // V12 - Reconnaissance d'un ajout de colonne libre
     const commandeAjout = textPrompt.value.trim().match(

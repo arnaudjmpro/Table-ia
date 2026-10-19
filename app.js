@@ -1326,9 +1326,15 @@ async function modifyCurrentTable() {
                 Number(operation.value) !== 30 ||
                 String(operation.formula ?? "").trim() !== ""
             ) {
-                throw new Error(
-                    "L'IA n'a pas identifié correctement B2 et la valeur 30."
-                );
+                
+throw new Error(
+    "Réponse IA : " +
+    JSON.stringify({
+        cellule: operation.address,
+        valeur: operation.value,
+        formule: operation.formula
+    })
+);
             }
 
             statusText.textContent =

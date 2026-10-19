@@ -1188,6 +1188,62 @@ setTimeout(
      return data.operations;
  }
 
+ // V12 - Application directe d'une colonne Excel
+ async function applyExcelEditOperations(operations, excelContext) {
+
+     if (!Array.isArray(operations) || operations.length !== 1) {
+         throw new Error("Une seule opération autorisée pour ce test.");
+     }
+
+     const operation = operations[0];
+
+     if (operation.action !== "add_column") {
+         throw new Error("Opération non encore prise en charge.");
+     }
+
+     const columnName = String(operation.columnName ?? "").trim();
+
+     if (!columnName || columnName.length > 60) {
+         throw new Error("Nom de colonne invalide.");
+     }
+
+     if (String(operation.formula ?? "").trim()) {
+         throw new Error("Les colonnes calculées seront ajoutées ensuite.");
+     }
+
+     return await Excel.run(async function (context) {
+
+         const sheet =
+             context.workbook.worksheets.getActiveWorksheet();
+
+         const table =
+             sheet.tables.getItem(excelContext.tableName);
+
+         sheet.load("name");
+         table.columns.load("items/name");
+
+         await context.sync();
+
+         if (sheet.name !== excelContext.sheetName) {
+             throw new Error("La feuille active a changé.");
+         }
+
+         const existe = table.columns.items.some(
+             column => column.name.toLowerCase() === columnName.toLowerCase()
+         );
+
+         if (existe) {
+             throw new Error("Cette colonne existe déjà.");
+         }
+
+         table.columns.add(-1, null, columnName);
+
+         await context.sync();
+
+         return columnName;
+     });
+ }
+
 async function modifyCurrentTable() {
 
     // V12 - Test des instructions IA sans modifier Excel

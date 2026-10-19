@@ -1190,6 +1190,40 @@ setTimeout(
 
 async function modifyCurrentTable() {
 
+    // V12 - Test des instructions IA sans modifier Excel
+    if (
+        textPrompt.value.trim().toLowerCase() ===
+        "teste le plan ia"
+    ) {
+        try {
+            const excelContext =
+                await readExcelContextForEdit();
+
+            const operations =
+                await requestExcelEditPlan(
+                    "Ajoute une colonne Observation sans formule.",
+                    excelContext
+                );
+
+            console.log(
+                "TableIA - Opérations proposées :",
+                operations
+            );
+
+            statusText.textContent =
+                "✅ Plan IA reçu : " +
+                operations.map(op => op.action).join(", ") +
+                ". Aucune cellule modifiée.";
+
+        } catch (error) {
+            console.error(error);
+            statusText.textContent =
+                "❌ Test IA impossible : " + error.message;
+        }
+
+        return;
+    }
+
     // V12 - Test sécurisé de lecture du tableau Excel
     if (
         textPrompt.value.trim().toLowerCase() ===

@@ -565,10 +565,22 @@ if (SpeechRecognition || isEmbeddedInOffice) {
         const prompt =
             textPrompt.value.trim();
 
-if (currentTableData) {
+let tableauExiste = false;
 
+if (prompt && !selectedPhoto && typeof Excel !== "undefined") {
+    try {
+        tableauExiste = await hasExcelTableOnActiveSheet();
+    } catch (error) {
+        console.error(error);
+        statusText.textContent =
+            "❌ Impossible de vérifier le tableau Excel : " +
+            error.message;
+        return;
+    }
+}
+
+if (currentTableData || tableauExiste) {
     await modifyCurrentTable();
-
     return;
 }
         
@@ -1151,6 +1163,43 @@ setTimeout(
      });
  }
 
+ // V12 - Détecter un tableau Excel existant
+ async function hasExcelTableOnActiveSheet() {
+     if (typeof Excel === "undefined") {
+         return false;
+     }
+
+     return await Excel.run(async function (context) {
+         const sheet =
+             context.workbook.worksheets.getActiveWorksheet();
+
+         const tables = sheet.tables;
+         tables.load("items/name");
+
+         await context.sync();
+
+         return tables.items.length === 1;
+     });
+ }
+
+ // V12 - Retrouver le mode modification après rechargement
+ officeInitialization.then(async function () {
+     try {
+         const tableauExiste =
+             await hasExcelTableOnActiveSheet();
+
+         if (tableauExiste) {
+             textAnalyzeButton.textContent =
+                 "✨ MODIFIER LE TABLEAU";
+         }
+     } catch (error) {
+         console.warn(
+             "Détection du tableau Excel impossible :",
+             error
+         );
+     }
+ });
+
  // V12 - Demander des opérations de modification à l'IA
  async function requestExcelEditPlan(prompt, excelContext) {
      const response = await fetch(
@@ -1410,6 +1459,20 @@ if (commandeAjout) {
         return;
     }
 
+    // V12 - Protéger le tableau Excel existant
+    try {
+        if (await hasExcelTableOnActiveSheet()) {
+            statusText.textContent =
+                "⚠️ Cette modification directe n'est pas encore prise en charge.";
+            return;
+        }
+    } catch (error) {
+        console.error(error);
+        statusText.textContent =
+            "❌ Vérification Excel impossible : " + error.message;
+        return;
+    }
+    
         if (!currentTableData) {
             statusText.textContent =
                 "Aucun tableau à modifier.";

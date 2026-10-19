@@ -1246,12 +1246,16 @@ setTimeout(
 
 async function modifyCurrentTable() {
 
-    // V12 - Test réel d'ajout direct d'une colonne par IA
-    if (
-        textPrompt.value.trim().toLowerCase() ===
-        "applique le plan ia"
-    ) {
-        textAnalyzeButton.disabled = true;
+    
+    // V12 - Reconnaissance d'un ajout de colonne libre
+    const commandeAjout = textPrompt.value.trim().match(
+        /^ajoute\s+une\s+colonne\s+([\p{L}][\p{L}\p{N} _-]{0,59})\.?$/iu
+    );
+   
+if (commandeAjout) {
+    const nomColonneDemande = commandeAjout[1].trim();
+
+    textAnalyzeButton.disabled = true;
 
         try {
             statusText.textContent =
@@ -1262,7 +1266,8 @@ async function modifyCurrentTable() {
 
             const operations =
                 await requestExcelEditPlan(
-                    "Ajoute une colonne Observation sans formule.",
+                    `Ajoute une colonne ${nomColonneDemande} sans formule.`,
+
                     excelContext
                 );
 
@@ -1270,7 +1275,7 @@ async function modifyCurrentTable() {
             if (
                 operations.length !== 1 ||
                 operations[0].action !== "add_column" ||
-                operations[0].columnName.trim().toLowerCase() !== "observation" ||
+                String(operations[0].columnName ?? "").trim().toLowerCase() !== nomColonneDemande.toLowerCase() ||
                 String(operations[0].formula ?? "").trim() !== ""
             ) {
                 throw new Error(

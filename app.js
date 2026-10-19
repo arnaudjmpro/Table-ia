@@ -1246,6 +1246,61 @@ setTimeout(
 
 async function modifyCurrentTable() {
 
+    // V12 - Test réel d'ajout direct d'une colonne par IA
+    if (
+        textPrompt.value.trim().toLowerCase() ===
+        "applique le plan ia"
+    ) {
+        textAnalyzeButton.disabled = true;
+
+        try {
+            statusText.textContent =
+                "⏳ Préparation de la modification Excel...";
+
+            const excelContext =
+                await readExcelContextForEdit();
+
+            const operations =
+                await requestExcelEditPlan(
+                    "Ajoute une colonne Observation sans formule.",
+                    excelContext
+                );
+
+            // Vérification avant toute écriture
+            if (
+                operations.length !== 1 ||
+                operations[0].action !== "add_column" ||
+                operations[0].columnName.trim().toLowerCase() !== "observation" ||
+                String(operations[0].formula ?? "").trim() !== ""
+            ) {
+                throw new Error(
+                    "Le plan IA ne correspond pas au test attendu."
+                );
+            }
+
+            const columnName =
+                await applyExcelEditOperations(
+                    operations,
+                    excelContext
+                );
+
+            statusText.textContent =
+                "✅ Colonne " + columnName +
+                " ajoutée directement dans Excel.";
+
+        } catch (error) {
+            console.error(error);
+
+            statusText.textContent =
+                "❌ Modification impossible : " +
+                error.message;
+        } finally {
+            textAnalyzeButton.disabled = false;
+        }
+
+        return;
+    }
+    
     // V12 - Test des instructions IA sans modifier Excel
     if (
         textPrompt.value.trim().toLowerCase() ===

@@ -1733,6 +1733,7 @@ async function updateLinkedExcelTable(data, expectedFingerprint) {
                     const oldType = oldColumnIndex < 0 ? null : current.data.columns[oldColumnIndex]?.type;
                     const keepFormat = !column.type || column.type === oldType;
                     let format = (keepFormat && originalFormat) || excelNumberFormatForType(column.type);
+                    if ((column.type || oldType) === "date") format = excelNumberFormatForType("date");                   
                     if (formula && format === "@") format = "General";
                     cell.numberFormat = [[format]];
                     if (formula) formulaMatrix[rowIndex][columnIndex] = normalizeExcelFormula(formula, {row: nextRect.row + rowIndex + 2});

@@ -4,18 +4,6 @@ const SUPABASE_FUNCTION_URL =
 const SUPABASE_PUBLISHABLE_KEY =
     "sb_publishable_LU68bB5ip1OEPr8DJnjJJg_G36GmXoY";
 
-const PHOTO_BRIDGE_FUNCTION_URL =
-    SUPABASE_FUNCTION_URL.replace(
-        /tableia-ai$/,
-        "tableia-photo-bridge"
-    );
-
-const PHOTO_SESSION_TTL_MS =
-    10 * 60 * 1000;
-
-const PHOTO_POLL_INTERVAL_MS =
-    1500;
-
 const textPrompt =
     document.getElementById("textPrompt");
 
@@ -115,8 +103,17 @@ clearPromptButton.style.display =
 let selectedPhoto = null;
 let currentTableData = null;
 let previousTableData = null;
-let activePhotoSession = null;
-let photoPollTimer = null;
+let cameraDialog = null;
+
+// Le lien vise un tableau précis du classeur, même après son renommage.
+const EXCEL_TABLE_SETTING = "tableia.linkedTable.v1";
+let linkedExcelTable = null;
+let excelSyncTimer = null;
+let excelSyncBusy = false;
+let excelSyncGeneration = 0;
+let excelPreviewIsDraft = false;
+let excelDraftBase = null;
+let lastExcelSnapshot = null;
 
 // ==========================================
 // DICTÉE VOCALE
@@ -337,7 +334,8 @@ if (SpeechRecognition || isEmbeddedInOffice) {
         newRecognition.interimResults =
             false;
 
-        newRecognition.continuous = true;
+        newRecognition.continuous =
+            false;
 
         newRecognition.addEventListener(
             "start",
@@ -565,22 +563,10 @@ if (SpeechRecognition || isEmbeddedInOffice) {
         const prompt =
             textPrompt.value.trim();
 
-let tableauExiste = false;
+if (currentTableData) {
 
-if (prompt && !selectedPhoto && typeof Excel !== "undefined") {
-    try {
-        tableauExiste = await hasExcelTableOnActiveSheet();
-    } catch (error) {
-        console.error(error);
-        statusText.textContent =
-            "❌ Impossible de vérifier le tableau Excel : " +
-            error.message;
-        return;
-    }
-}
-
-if (currentTableData || tableauExiste) {
     await modifyCurrentTable();
+
     return;
 }
         
@@ -775,232 +761,141 @@ function dataUrlToPhotoFile(dataUrl) {
     );
 }
 
-function createSecurePhotoSessionId() {
-    const randomBytes =
-        new Uint8Array(32);
-
-    crypto.getRandomValues(
-        randomBytes
-    );
-
-    return Array.from(randomBytes)
-        .map(function (value) {
-            return value
-                .toString(16)
-                .padStart(2, "0");
-        })
-        .join("");
-}
-
-async function callPhotoBridge(payload) {
-    const response =
-        await fetch(
-            PHOTO_BRIDGE_FUNCTION_URL,
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    apikey:
-                        SUPABASE_PUBLISHABLE_KEY,
-                    Authorization:
-                        `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
-                },
-                body: JSON.stringify(payload)
-            }
-        );
-
-    let data = {};
-
-    try {
-        data = await response.json();
-    } catch (_) {
-        data = {};
-    }
-
-    if (!response.ok) {
-        throw new Error(
-            data.error ||
-            "Le relais photo ne répond pas."
-        );
-    }
-
-    return data;
-}
-
-function clearPhotoPolling() {
-    if (photoPollTimer) {
-        clearTimeout(photoPollTimer);
-        photoPollTimer = null;
-    }
-}
-
-function stopPhotoSession(
-    cancelRemote = false
-) {
-    const session =
-        activePhotoSession;
-
-    activePhotoSession = null;
-    clearPhotoPolling();
-
-    if (cancelRemote && session) {
-        callPhotoBridge({
-            action: "cancel",
-            sessionId: session.id
-        }).catch(function () {
-            // La session expirera automatiquement si le réseau est indisponible.
-        });
-    }
-}
-
-async function pollPhotoSession(sessionId) {
+function openOfficeCameraDialog() {
     if (
-        !activePhotoSession ||
-        activePhotoSession.id !== sessionId
+        typeof Office === "undefined" ||
+        !Office.context ||
+        !Office.context.ui ||
+        typeof Office.context.ui.displayDialogAsync !== "function"
     ) {
+        throw new Error(
+            "La fenêtre sécurisée de prise de photo n'est pas disponible dans cette version d'Excel."
+        );
+    }
+
+    if (cameraDialog) {
         return;
     }
 
-    if (
-        Date.now() >
-        activePhotoSession.expiresAt
-    ) {
-        stopPhotoSession(true);
-        statusText.textContent =
-            "La prise de photo a expiré. Appuyez de nouveau sur le bouton.";
-        return;
-    }
-
-    try {
-        const result =
-            await callPhotoBridge({
-                action: "poll",
-                sessionId: sessionId
-            });
-
-        if (
-            result.status === "ready" &&
-            result.imageBase64 &&
-            result.imageMimeType
-        ) {
-            const dataUrl =
-                `data:${result.imageMimeType};base64,${result.imageBase64}`;
-
-            const photoFile =
-                dataUrlToPhotoFile(dataUrl);
-
-            stopPhotoSession(false);
-            handleSelectedPhoto(photoFile);
-            return;
-        }
-    } catch (error) {
-        console.warn(
-            "Relais photo temporairement indisponible.",
-            error
-        );
-    }
-
-    photoPollTimer =
-        setTimeout(
-            function () {
-                pollPhotoSession(sessionId);
-            },
-            PHOTO_POLL_INTERVAL_MS
-        );
-}
-
-function openExternalCameraCapture() {
-    if (
-        !window.crypto ||
-        typeof window.crypto.getRandomValues !== "function"
-    ) {
-        throw new Error(
-            "La connexion sécurisée nécessaire à la photo n'est pas disponible."
-        );
-    }
-
-    if (activePhotoSession) {
-        stopPhotoSession(true);
-    }
-
-    const sessionId =
-        createSecurePhotoSessionId();
-
-    const cameraUrl =
+    const dialogUrl =
         new URL(
             "dialog-camera.html",
             window.location.href
-        );
-
-    cameraUrl.searchParams.set(
-        "external",
-        "1"
-    );
-
-    cameraUrl.searchParams.set(
-        "session",
-        sessionId
-    );
-
-    cameraUrl.searchParams.set(
-        "v",
-        "20260927-1"
-    );
-
-    activePhotoSession = {
-        id: sessionId,
-        expiresAt:
-            Date.now() +
-            PHOTO_SESSION_TTL_MS
-    };
-
-    let opened = false;
-
-    if (
-        typeof Office !== "undefined" &&
-        Office.context &&
-        Office.context.ui &&
-        typeof Office.context.ui.openBrowserWindow === "function"
-    ) {
-        Office.context.ui.openBrowserWindow(
-            cameraUrl.href
-        );
-        opened = true;
-    } else {
-        const browserWindow =
-            window.open(
-                cameraUrl.href,
-                "_blank"
-            );
-
-        opened = Boolean(browserWindow);
-
-        if (browserWindow) {
-            browserWindow.opener = null;
-        }
-    }
-
-    if (!opened) {
-        stopPhotoSession(true);
-        throw new Error(
-            "Le navigateur a bloqué l'ouverture de la caméra."
-        );
-    }
+        ).href;
 
     statusText.textContent =
-        "📷 La caméra est ouverte dans votre navigateur. Revenez ici après la photo.";
+        "Ouverture de la caméra du Mac...";
 
-    callPhotoBridge({
-        action: "create",
-        sessionId: sessionId
-    }).catch(function (error) {
-        console.warn(
-            "Initialisation du relais photo retardée.",
-            error
-        );
-    });
+    Office.context.ui.displayDialogAsync(
+        dialogUrl,
+        {
+            height: 48,
+            width: 38,
+            displayInIframe: false
+        },
+        function (asyncResult) {
+            if (
+                asyncResult.status !==
+                Office.AsyncResultStatus.Succeeded
+            ) {
+                statusText.textContent =
+                    "❌ Ouverture de la caméra impossible : " +
+                    (
+                        asyncResult.error?.message ||
+                        "erreur inconnue"
+                    );
+                return;
+            }
 
-    pollPhotoSession(sessionId);
+            const activeDialog =
+                asyncResult.value;
+
+            cameraDialog =
+                activeDialog;
+
+            let photoReceived =
+                false;
+
+            statusText.textContent =
+                "📷 Activez la caméra dans la petite fenêtre.";
+
+            activeDialog.addEventHandler(
+                Office.EventType.DialogMessageReceived,
+                function (event) {
+                    try {
+                        const payload =
+                            JSON.parse(event.message);
+
+                        if (
+                            payload.type ===
+                            "tableia-camera-error"
+                        ) {
+                            throw new Error(
+                                payload.message ||
+                                "La caméra n'est pas disponible."
+                            );
+                        }
+
+                        if (
+                            payload.type !==
+                            "tableia-camera-photo"
+                        ) {
+                            throw new Error(
+                                "Réponse de la caméra non reconnue."
+                            );
+                        }
+
+                        const photoFile =
+                            dataUrlToPhotoFile(
+                                payload.dataUrl
+                            );
+
+                        photoReceived =
+                            true;
+
+                        handleSelectedPhoto(
+                            photoFile
+                        );
+
+                        activeDialog.close();
+
+                        if (
+                            cameraDialog ===
+                            activeDialog
+                        ) {
+                            cameraDialog =
+                                null;
+                        }
+                    } catch (error) {
+                        statusText.textContent =
+                            "❌ Photo : " +
+                            (
+                                error?.message ||
+                                "réception impossible"
+                            );
+                    }
+                }
+            );
+
+            activeDialog.addEventHandler(
+                Office.EventType.DialogEventReceived,
+                function () {
+                    if (
+                        cameraDialog ===
+                        activeDialog
+                    ) {
+                        cameraDialog =
+                            null;
+                    }
+
+                    if (!photoReceived) {
+                        statusText.textContent =
+                            "Prise de photo fermée sans ajouter d'image.";
+                    }
+                }
+            );
+        }
+    );
 }
 
 function handleSelectedPhoto(file) {
@@ -1034,9 +929,10 @@ cameraButton.addEventListener(
     function (event) {
         // Sur téléphone et tablette, le champ capture natif reste
         // la solution la plus directe et déjà validée.
-        if (isMobileCaptureDevice) {
-            event.preventDefault();
-            cameraInput.click();
+        if (
+            isMobileCaptureDevice ||
+            !isEmbeddedInOffice
+        ) {
             return;
         }
 
@@ -1045,7 +941,7 @@ cameraButton.addEventListener(
         event.preventDefault();
 
         try {
-            openExternalCameraCapture();
+            openOfficeCameraDialog();
         } catch (error) {
             console.error(error);
 
@@ -1089,6 +985,7 @@ deleteTableButton.addEventListener(
             "";
         
 currentTableData = null;
+        detachExcelTable();
         textAnalyzeButton.textContent =
     "✨ CRÉER LE TABLEAU";
 previousTableData =
@@ -1118,431 +1015,14 @@ setTimeout(
         
     }
 );
-
- // V12 - Lecture du tableau Excel actuel
- async function readExcelContextForEdit() {
-     if (typeof Excel === "undefined") {
-         throw new Error("Excel n'est pas disponible.");
-     }
-
-     return await Excel.run(async function (context) {
-         const sheet =
-             context.workbook.worksheets.getActiveWorksheet();
-
-         const tables = sheet.tables;
-         tables.load("items/name");
-
-         sheet.load("name");
-         await context.sync();
-
-         if (tables.items.length !== 1) {
-             throw new Error(
-                 "Sélectionne une feuille contenant exactement un tableau Excel."
-             );
-         }
-
-         const table = tables.items[0];
-         const range = table.getRange();
-
-         range.load("address,values,formulas,rowCount,columnCount");
-         await context.sync();
-
-         if (range.rowCount > 200 || range.columnCount > 30) {
-             throw new Error(
-                 "Tableau trop volumineux pour ce premier test."
-             );
-         }
-
-         return {
-             sheetName: sheet.name,
-             tableName: table.name,
-             address: range.address,
-             values: range.values,
-             formulas: range.formulas
-         };
-     });
- }
-
- // V12 - Détecter un tableau Excel existant
- async function hasExcelTableOnActiveSheet() {
-     if (typeof Excel === "undefined") {
-         return false;
-     }
-
-     return await Excel.run(async function (context) {
-         const sheet =
-             context.workbook.worksheets.getActiveWorksheet();
-
-         const tables = sheet.tables;
-         tables.load("items/name");
-
-         await context.sync();
-
-         return tables.items.length === 1;
-     });
- }
-
- // V12 - Retrouver le mode modification après rechargement
- officeInitialization.then(async function () {
-     try {
-         const tableauExiste =
-             await hasExcelTableOnActiveSheet();
-
-         if (tableauExiste) {
-             textAnalyzeButton.textContent =
-                 "✨ MODIFIER LE TABLEAU";
-         }
-     } catch (error) {
-         console.warn(
-             "Détection du tableau Excel impossible :",
-             error
-         );
-     }
- });
-
- // V12 - Demander des opérations de modification à l'IA
- async function requestExcelEditPlan(prompt, excelContext) {
-     const response = await fetch(
-         SUPABASE_FUNCTION_URL,
-         {
-             method: "POST",
-             headers: {
-                 "Content-Type": "application/json",
-                 "apikey": SUPABASE_PUBLISHABLE_KEY,
-                 "Authorization":
-                     `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
-             },
-             body: JSON.stringify({
-                 mode: "edit",
-                 prompt: prompt,
-                 excelContext: excelContext
-             })
-         }
-     );
-
-     const data = await response.json();
-
-     if (!response.ok) {
-         throw new Error(
-             data.error || "Erreur du moteur IA."
-         );
-     }
-
-     if (!data || !Array.isArray(data.operations)) {
-         throw new Error(
-             "Les instructions IA sont invalides."
-         );
-     }
-
-     return data.operations;
- }
-
- // V12 - Application directe d'une colonne Excel
- async function applyExcelEditOperations(operations, excelContext) {
-
-     if (!Array.isArray(operations) || operations.length !== 1) {
-         throw new Error("Une seule opération autorisée pour ce test.");
-     }
-
-     const operation = operations[0];
-
-     if (operation.action !== "add_column") {
-         throw new Error("Opération non encore prise en charge.");
-     }
-
-     const columnName = String(operation.columnName ?? "").trim();
-
-     if (!columnName || columnName.length > 60) {
-         throw new Error("Nom de colonne invalide.");
-     }
-
-     if (String(operation.formula ?? "").trim()) {
-         throw new Error("Les colonnes calculées seront ajoutées ensuite.");
-     }
-
-     return await Excel.run(async function (context) {
-
-         const sheet =
-             context.workbook.worksheets.getActiveWorksheet();
-
-         const table =
-             sheet.tables.getItem(excelContext.tableName);
-
-         sheet.load("name");
-         table.columns.load("items/name");
-
-         await context.sync();
-
-         if (sheet.name !== excelContext.sheetName) {
-             throw new Error("La feuille active a changé.");
-         }
-
-         const existe = table.columns.items.some(
-             column => column.name.toLowerCase() === columnName.toLowerCase()
-         );
-
-         if (existe) {
-             throw new Error("Cette colonne existe déjà.");
-         }
-
-         table.columns.add(-1, null, columnName);
-
-         await context.sync();
-
-         return columnName;
-     });
- }
-
 async function modifyCurrentTable() {
 
-    // V12 - Test IA : modification d'une cellule
-    if (
-        textPrompt.value.trim().toLowerCase() ===
-        "teste modification clavier"
-    ) {
-        try {
-            const excelContext =
-                await readExcelContextForEdit();
-
-            const operations =
-                await requestExcelEditPlan(
-                    "Mets la quantité du clavier sans fil à 30.",
-                    excelContext
-                );
-
-            if (
-                operations.length !== 1 ||
-                operations[0].action !== "set_cell"
-            ) {
-                throw new Error(
-                    "L'IA n'a pas proposé une modification de cellule."
-                );
-            }
-
-            const operation = operations[0];
-
-            if (
-                String(operation.address ?? "").toUpperCase() !== "B2" ||
-                Number(operation.value) !== 30 ||
-                String(operation.formula ?? "").trim() !== ""
-            ) {
-                
-throw new Error(
-    "Réponse IA : " +
-    JSON.stringify({
-        cellule: operation.address,
-        valeur: operation.value,
-        formule: operation.formula
-    })
-);
-            }
-
-            statusText.textContent =
-                "✅ Plan IA validé : cellule B2 → 30. " +
-                "Aucune modification effectuée.";
-
-            console.log(
-                "TableIA - Test modification cellule :",
-                operation
-            );
-
-        } catch (error) {
-            console.error(error);
-            statusText.textContent =
-                "❌ Test impossible : " + error.message;
-        }
-
-        return;
-    }
-    
-    // V12 - Reconnaissance d'un ajout de colonne libre
-    const commandeAjout = textPrompt.value.trim().match(
-        /^ajoute\s+une\s+colonne\s+([\p{L}][\p{L}\p{N} _-]{0,59})\.?$/iu
-    );
-   
-if (commandeAjout) {
-    const nomColonneDemande = commandeAjout[1].trim();
-
-    textAnalyzeButton.disabled = true;
-
-        try {
-            statusText.textContent =
-                "⏳ Préparation de la modification Excel...";
-
-            const excelContext =
-                await readExcelContextForEdit();
-
-            const operations =
-                await requestExcelEditPlan(
-                    `Ajoute une colonne ${nomColonneDemande} sans formule.`,
-
-                    excelContext
-                );
-
-            // Vérification avant toute écriture
-            if (
-                operations.length !== 1 ||
-                operations[0].action !== "add_column" ||
-                String(operations[0].columnName ?? "").trim().toLowerCase() !== nomColonneDemande.toLowerCase() ||
-                String(operations[0].formula ?? "").trim() !== ""
-            ) {
-                throw new Error(
-                    "Le plan IA ne correspond pas au test attendu."
-                );
-            }
-
-            const columnName =
-                await applyExcelEditOperations(
-                    operations,
-                    excelContext
-                );
-
-            statusText.textContent =
-                "✅ Colonne " + columnName +
-                " ajoutée directement dans Excel.";
-
-        } catch (error) {
-            console.error(error);
-
-            statusText.textContent =
-                "❌ Modification impossible : " +
-                error.message;
-        } finally {
-            textAnalyzeButton.disabled = false;
-        }
-
-        return;
-    }
-    
-    // V12 - Test des instructions IA sans modifier Excel
-    if (
-        textPrompt.value.trim().toLowerCase() ===
-        "teste le plan ia"
-    ) {
-        try {
-            const excelContext =
-                await readExcelContextForEdit();
-
-            const operations =
-                await requestExcelEditPlan(
-                    "Ajoute une colonne Observation sans formule.",
-                    excelContext
-                );
-
-            console.log(
-                "TableIA - Opérations proposées :",
-                operations
-            );
-
-            statusText.textContent =
-                "✅ Plan IA reçu : " +
-                operations.map(op => op.action).join(", ") +
-                ". Aucune cellule modifiée.";
-
-        } catch (error) {
-            console.error(error);
-            statusText.textContent =
-                "❌ Test IA impossible : " + error.message;
-        }
-
-        return;
-    }
-
-    // V12 - Test sécurisé de lecture du tableau Excel
-    if (
-        textPrompt.value.trim().toLowerCase() ===
-        "vérifie le tableau excel"
-    ) {
-        try {
-            const excelContext =
-                await readExcelContextForEdit();
-
-            const nombreLignes =
-                excelContext.values.length - 1;
-
-            const nombreColonnes =
-                excelContext.values[0].length;
-
-            statusText.textContent =
-                "✅ Lecture Excel réussie : " +
-                excelContext.tableName +
-                " (" + nombreLignes + " lignes, " +
-                nombreColonnes + " colonnes).";
-
-            console.log(
-                "TableIA - Contexte Excel lu :",
-                excelContext
-            );
-        } catch (error) {
-            console.error(error);
-
-            statusText.textContent =
-                "❌ Lecture Excel impossible : " +
-                error.message;
-        }
-
-        return;
-    }
-    
-    // V12 - Modification directe d'une cellule Excel
-    const commande = textPrompt.value.trim().match(
-        /^remplace\s+(?:la\s+)?cellule\s+([A-Z]{1,3}[1-9]\d*)\s+par\s+(-?\d+(?:[.,]\d+)?)\.?$/i
-    );
-
-    if (commande) {
-        const adresse = commande[1].toUpperCase();
-        const valeur = Number(commande[2].replace(",", "."));
-
-        if (typeof Excel === "undefined") {
-            statusText.textContent = "Excel n'est pas disponible.";
-            return;
-        }
-
-        try {
-            await Excel.run(async function (context) {
-                const feuille = context.workbook.worksheets.getActiveWorksheet();
-                const cellule = feuille.getRange(adresse);
-
-                cellule.values = [[valeur]];
-                await context.sync();
-            });
-
-            statusText.textContent =
-                "✅ Cellule " + adresse + " modifiée dans Excel.";
-        } catch (erreur) {
-            console.error(erreur);
-            statusText.textContent =
-                "❌ Modification impossible : " + erreur.message;
-        }
-
-        return;
-    }
-
-    // V12 - Protéger le tableau Excel existant
-    try {
-        if (await hasExcelTableOnActiveSheet()) {
-            statusText.textContent =
-                "⚠️ Cette modification directe n'est pas encore prise en charge.";
-            return;
-        }
-    } catch (error) {
-        console.error(error);
-        statusText.textContent =
-            "❌ Vérification Excel impossible : " + error.message;
-        return;
-    }
-    
         if (!currentTableData) {
             statusText.textContent =
                 "Aucun tableau à modifier.";
             return;
         }
 
-previousTableData =
-    JSON.parse(
-        JSON.stringify(currentTableData)
-    );
-        
         const instruction =
     textPrompt.value.trim();
 
@@ -1559,6 +1039,28 @@ if (!instruction) {
             "✨ Modification du tableau par l'IA...";
 
         try {
+
+            // Toujours relire Excel avant de préparer la demande IA.
+            // Une erreur de lecture interrompt la demande : aucune ancienne
+            // copie ne doit être envoyée comme s'il s'agissait du classeur.
+            let sourceFingerprint = null;
+            const sourceGeneration = excelSyncGeneration;
+            if (linkedExcelTable) {
+                const snapshot = await readLinkedExcelTable();
+                sourceFingerprint = JSON.stringify(snapshot.data);
+                if (excelPreviewIsDraft && sourceFingerprint !== excelDraftBase) {
+                    throw new Error(
+                        "Excel a changé depuis la proposition IA. " +
+                        "Clique sur Annuler pour reprendre les données d'Excel."
+                    );
+                }
+                if (!excelPreviewIsDraft) {
+                    displayAiTable(snapshot.data, snapshot.displayRows);
+                    lastExcelSnapshot = JSON.stringify(snapshot);
+                }
+            }
+            const tableBeforeModification =
+                JSON.parse(JSON.stringify(currentTableData));
 
             const response =
                 await fetch(
@@ -1581,9 +1083,11 @@ if (!instruction) {
                             prompt:
                                 "Modifie ce tableau existant selon la demande de l'utilisateur. " +
                                 "Conserve toutes les données qui ne sont pas concernées. " +
+                                "Les formules Excel présentes dans les cellules doivent être conservées " +
+                                "sauf si la demande exige leur modification. " +
                                 "Retourne le tableau complet au format TableIA.\n\n" +
                                 "TABLEAU ACTUEL :\n" +
-                                JSON.stringify(currentTableData) +
+                                JSON.stringify(tableBeforeModification) +
                                 "\n\nMODIFICATION DEMANDÉE :\n" +
                                 instruction
                         })
@@ -1602,17 +1106,32 @@ if (!instruction) {
             const data =
                 JSON.parse(responseText);
 
+            if (sourceGeneration !== excelSyncGeneration) {
+                throw new Error("Le tableau a changé. Relance ta demande.");
+            }
+            if (linkedExcelTable) {
+                const latest = await readLinkedExcelTable();
+                if (JSON.stringify(latest.data) !== sourceFingerprint) {
+                    throw new Error(
+                        "Le tableau Excel a changé pendant l'analyse. " +
+                        "Relance ta demande pour utiliser les dernières données."
+                    );
+                }
+            }
             displayAiTable(data);
+            previousTableData = tableBeforeModification;
+            excelPreviewIsDraft = Boolean(linkedExcelTable);
+            excelDraftBase = sourceFingerprint;
 
             statusText.textContent =
-                "✅ Tableau modifié avec succès.";
+                "✅ Aperçu modifié. Clique sur Insérer pour créer cette nouvelle version dans Excel.";
 
         } catch (error) {
 
             console.error(error);
 
             statusText.textContent =
-                "❌ Impossible de modifier le tableau.";
+                "❌ " + (error?.message || "Impossible de modifier le tableau.");
         }
 
 textAnalyzeButton.disabled =
@@ -1622,8 +1141,22 @@ textAnalyzeButton.disabled =
 
 undoTableButton.addEventListener(
     "click",
-    function () {
+    async function () {
 
+        if (linkedExcelTable) {
+            try {
+                const snapshot = await readLinkedExcelTable();
+                excelPreviewIsDraft = false;
+                excelDraftBase = null;
+                previousTableData = null;
+                displayAiTable(snapshot.data, snapshot.displayRows);
+                lastExcelSnapshot = JSON.stringify(snapshot);
+                statusText.textContent = "↩ Aperçu rétabli depuis Excel.";
+            } catch (error) {
+                statusText.textContent = "❌ " + error.message;
+            }
+            return;
+        }
         if (!previousTableData) {
             statusText.textContent =
                 "Aucune modification à annuler.";
@@ -1700,6 +1233,8 @@ function normalizeExcelFormula(
 }
 
 function coerceExcelValue(value, type) {
+    // Conserve aussi les numéros de série des dates relues dans ce classeur.
+    if (typeof value === "number" || typeof value === "boolean") return value;
     if (
         value === null ||
         value === undefined ||
@@ -1821,6 +1356,203 @@ function excelNumberFormatForType(type) {
     }
 }
 
+// ==========================================
+// LECTURE DES MODIFICATIONS NATIVES D'EXCEL
+// ==========================================
+
+function excelDocumentSettings() {
+    return typeof Office !== "undefined"
+        ? Office.context?.document?.settings
+        : null;
+}
+
+function rememberExcelTable() {
+    const settings = excelDocumentSettings();
+    if (!settings) return;
+    try {
+        if (linkedExcelTable) {
+            settings.set(EXCEL_TABLE_SETTING, linkedExcelTable);
+        } else {
+            settings.remove(EXCEL_TABLE_SETTING);
+        }
+        settings.saveAsync(function (result) {
+            if (result.status === Office.AsyncResultStatus.Failed) {
+                console.warn("Le lien Excel n'a pas pu être mémorisé.", result.error);
+            }
+        });
+    } catch (error) {
+        console.warn("Mémorisation du lien Excel impossible.", error);
+    }
+}
+
+function detachExcelTable() {
+    linkedExcelTable = null;
+    excelSyncGeneration += 1;
+    clearTimeout(excelSyncTimer);
+    excelPreviewIsDraft = false;
+    excelDraftBase = null;
+    lastExcelSnapshot = null;
+    rememberExcelTable();
+}
+
+function inferExcelColumnType(format, values, previousType) {
+    // Le format actuel prime sur l'ancien type : l'utilisateur peut le changer.
+    const cleanFormat = String(format || "General")
+        .replace(/"[^"]*"/g, "");
+    if (/%/.test(cleanFormat)) return "percentage";
+    if (/[€$£¥]/.test(String(format))) return "currency";
+    if (/[dy]/i.test(cleanFormat) && /[m/\-]/i.test(cleanFormat)) return "date";
+    if (cleanFormat === "@") return "text";
+    const nonEmpty = values.filter(value => value !== "" && value != null);
+    if (nonEmpty.length && nonEmpty.every(value => typeof value === "boolean")) {
+        return "boolean";
+    }
+    if (nonEmpty.length && nonEmpty.every(value => typeof value === "number")) {
+        return "number";
+    }
+    return previousType || "text";
+}
+
+async function readLinkedExcelTable() {
+    if (!linkedExcelTable || typeof Excel === "undefined") {
+        throw new Error("Aucun tableau Excel lié.");
+    }
+    const reference = linkedExcelTable;
+    return Excel.run(async function (context) {
+        // getItem accepte le nom ou l'identifiant. L'identifiant résiste au renommage.
+        const tables = context.workbook.tables;
+        tables.load("items/id,items/name");
+        await context.sync();
+        const table = tables.items.find(item => item.id === reference.id);
+        if (!table) {
+            throw new Error(
+                "Le tableau lié a été supprimé ou converti en plage. " +
+                "Crée un nouveau tableau pour poursuivre."
+            );
+        }
+        table.load("showHeaders,showTotals");
+        const headers = table.getHeaderRowRange();
+        const range = table.getRange();
+        headers.load("values");
+        range.load("values,text,formulas,numberFormat");
+        await context.sync();
+
+        const firstDataRow = table.showHeaders ? 1 : 0;
+        const endDataRow = range.values.length - (table.showTotals ? 1 : 0);
+        const values = range.values.slice(firstDataRow, endDataRow);
+        const displayRows = range.text.slice(firstDataRow, endDataRow);
+        const formulas = range.formulas.slice(firstDataRow, endDataRow);
+        const formats = range.numberFormat.slice(firstDataRow, endDataRow);
+        const oldColumns = reference.columns || [];
+        const names = headers.values[0] || [];
+        const columns = names.map(function (name, columnIndex) {
+            const oldColumn = oldColumns.find(column => column.name === String(name));
+            return {
+                name: String(name),
+                type: inferExcelColumnType(
+                    formats[0]?.[columnIndex],
+                    values.map(row => row[columnIndex]),
+                    oldColumn?.type
+                )
+                // Pas de formule de colonne ancienne : chaque cellule Excel
+                // est désormais la référence, y compris les exceptions manuelles.
+            };
+        });
+        const rows = values.map(function (row, rowIndex) {
+            return columns.map(function (column, columnIndex) {
+                const formula = formulas[rowIndex]?.[columnIndex];
+                if (typeof formula === "string" && formula.startsWith("=")) {
+                    return formula;
+                }
+                return row[columnIndex] ?? "";
+            });
+        });
+        return {
+            data: {
+                title: reference.title || table.name,
+                columns: columns,
+                rows: rows,
+                summaryFormulas: reference.summaryFormulas || []
+            },
+            displayRows: displayRows
+        };
+    });
+}
+
+function scheduleExcelRefresh(event) {
+    if (!linkedExcelTable) return;
+    if (event?.tableId && event.tableId !== linkedExcelTable.id) return;
+    clearTimeout(excelSyncTimer);
+    excelSyncTimer = setTimeout(refreshExcelPreview, 350);
+}
+
+async function refreshExcelPreview() {
+    if (!linkedExcelTable) return;
+    if (excelSyncBusy) {
+        scheduleExcelRefresh();
+        return;
+    }
+    excelSyncBusy = true;
+    const generation = excelSyncGeneration;
+    try {
+        const snapshot = await readLinkedExcelTable();
+        if (generation !== excelSyncGeneration) return;
+        const fingerprint = JSON.stringify(snapshot.data);
+        if (excelPreviewIsDraft) {
+            if (fingerprint !== excelDraftBase) {
+                statusText.textContent =
+                    "Excel a changé. Clique sur Annuler pour reprendre ses données dans l'aperçu.";
+            }
+            return;
+        }
+        const previewFingerprint = JSON.stringify(snapshot);
+        if (previewFingerprint !== lastExcelSnapshot) {
+            displayAiTable(snapshot.data, snapshot.displayRows);
+            previousTableData = null;
+            lastExcelSnapshot = previewFingerprint;
+        }
+    } catch (error) {
+        if (generation === excelSyncGeneration) {
+            console.warn("Lecture du tableau Excel impossible.", error);
+            statusText.textContent = "⚠️ " + error.message;
+        }
+    } finally {
+        excelSyncBusy = false;
+    }
+}
+
+async function initializeExcelTableSync() {
+    const info = await officeInitialization;
+    if (!info || typeof Excel === "undefined") return;
+    const generation = excelSyncGeneration;
+    try {
+        const saved = excelDocumentSettings()?.get(EXCEL_TABLE_SETTING);
+        // Aucun rattachement arbitraire aux anciens tableaux : réinsérer une
+        // première fois avec cette version établit le lien sans ambiguïté.
+        if (saved && typeof saved.id === "string" && !currentTableData &&
+            generation === excelSyncGeneration) {
+            linkedExcelTable = saved;
+            await refreshExcelPreview();
+        }
+        if (Office.context.requirements.isSetSupported("ExcelApi", "1.7")) {
+            await Excel.run(async function (context) {
+                context.workbook.tables.onChanged.add(scheduleExcelRefresh);
+                await context.sync();
+            });
+        }
+    } catch (error) {
+        console.warn("Initialisation du suivi Excel impossible.", error);
+    }
+}
+
+// Un retour au volet permet aussi de reprendre une suppression
+// de tableau et les recalculs, même si aucun événement de cellule n'est reçu.
+window.addEventListener("focus", function () { scheduleExcelRefresh(); });
+document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) scheduleExcelRefresh();
+});
+initializeExcelTableSync();
+
 insertExcelButton.addEventListener(
     "click",
     async function () {
@@ -1845,6 +1577,23 @@ insertExcelButton.addEventListener(
 
         try {
 
+            if (linkedExcelTable && !excelPreviewIsDraft) {
+                // Le second clic ne recrée pas une copie périmée du tableau.
+                const snapshot = await readLinkedExcelTable();
+                displayAiTable(snapshot.data, snapshot.displayRows);
+                lastExcelSnapshot = JSON.stringify(snapshot);
+                statusText.textContent = "✅ Tableau déjà lié. Modifie-le directement dans Excel.";
+                return;
+            }
+            if (linkedExcelTable && excelPreviewIsDraft) {
+                const snapshot = await readLinkedExcelTable();
+                if (JSON.stringify(snapshot.data) !== excelDraftBase) {
+                    throw new Error("Excel a changé. Clique sur Annuler et relance ta demande avant d'insérer.");
+                }
+            }
+            const insertionData = JSON.parse(JSON.stringify(currentTableData));
+            let insertedReference = null;
+
             await Excel.run(
                 async function (context) {
 
@@ -1853,14 +1602,14 @@ insertExcelButton.addEventListener(
                             .getActiveWorksheet();
 
                     const usedRange =
-                        sheet.getUsedRange();
+                        sheet.getUsedRangeOrNullObject();
 
                     usedRange.load("values");
 
                     await context.sync();
 
                     const activeSheetContainsData =
-                        usedRange.values.some(
+                        !usedRange.isNullObject && usedRange.values.some(
                             function (row) {
                                 return row.some(
                                     function (value) {
@@ -1875,7 +1624,7 @@ insertExcelButton.addEventListener(
                         sheet =
                             context.workbook.worksheets.add(
                                 createExcelWorksheetName(
-                                    currentTableData.title
+                                    insertionData.title
                                 )
                             );
 
@@ -1883,16 +1632,16 @@ insertExcelButton.addEventListener(
                     }
 
                     const headers =
-                        currentTableData.columns.map(
+                        insertionData.columns.map(
                             function (column) {
                                 return column.name || "";
                             }
                         );
 
                     const rows =
-                        Array.isArray(currentTableData.rows) &&
-                        currentTableData.rows.length
-                            ? currentTableData.rows
+                        Array.isArray(insertionData.rows) &&
+                        insertionData.rows.length
+                            ? insertionData.rows
                             : [[], [], []];
 
                     const values = [
@@ -1903,7 +1652,7 @@ insertExcelButton.addEventListener(
                                     function (_, index) {
                                         return coerceExcelValue(
                                             row[index],
-                                            currentTableData.columns[
+                                            insertionData.columns[
                                                 index
                                             ]?.type
                                         );
@@ -1946,7 +1695,7 @@ insertExcelButton.addEventListener(
                     const dataRowCount =
                         rows.length;
 
-                    currentTableData.columns.forEach(
+                    insertionData.columns.forEach(
                         function (column, columnIndex) {
                             const columnRange =
                                 sheet.getRangeByIndexes(
@@ -2009,15 +1758,26 @@ insertExcelButton.addEventListener(
                                             ];
                                         }
                                     );
+                            } else {
+                                // Les formules relues d'Excel sont portées par
+                                // les cellules, pour respecter les exceptions.
+                                rows.forEach(function (row, rowIndex) {
+                                    const value = row[columnIndex];
+                                    if (typeof value === "string" && value.startsWith("=")) {
+                                        const cell = sheet.getCell(rowIndex + 1, columnIndex);
+                                        cell.numberFormat = [[numberFormat === "@" ? "General" : numberFormat]];
+                                        cell.formulas = [[value]];
+                                    }
+                                });
                             }
                         }
                     );
 
                     const summaries =
                         Array.isArray(
-                            currentTableData.summaryFormulas
+                            insertionData.summaryFormulas
                         )
-                            ? currentTableData.summaryFormulas
+                            ? insertionData.summaryFormulas
                             : [];
 
                     summaries.forEach(
@@ -2077,7 +1837,7 @@ insertExcelButton.addEventListener(
 
                             valueCell.numberFormat = [[
                                 excelNumberFormatForType(
-                                    currentTableData.columns[
+                                    insertionData.columns[
                                         targetColumnIndex
                                     ]?.type
                                 )
@@ -2091,12 +1851,27 @@ insertExcelButton.addEventListener(
                     finalRange.format.autofitColumns();
                     finalRange.format.autofitRows();
 
+                    table.load("id");
                     await context.sync();
+                    insertedReference = {
+                        id: table.id,
+                        title: insertionData.title || table.name,
+                        columns: insertionData.columns.map(column => ({name: column.name, type: column.type})),
+                        summaryFormulas: insertionData.summaryFormulas || []
+                    };
                 }
             );
 
+            linkedExcelTable = insertedReference;
+            excelSyncGeneration += 1;
+            excelPreviewIsDraft = false;
+            excelDraftBase = null;
+            lastExcelSnapshot = null;
+            rememberExcelTable();
+            await refreshExcelPreview();
+
             statusText.textContent =
-                "✅ Véritable tableau Excel créé avec filtres, style et formules.";
+                "✅ Tableau lié. Tu peux modifier ses cellules, lignes et colonnes directement dans Excel.";
 
         } catch (error) {
 
@@ -2105,10 +1880,9 @@ insertExcelButton.addEventListener(
             statusText.textContent =
                 "❌ Impossible de créer le tableau Excel : " +
                 (error?.message || "erreur inconnue");
+        } finally {
+            insertExcelButton.disabled = false;
         }
-
-        insertExcelButton.disabled =
-            false;
     }
 );
 
@@ -2230,7 +2004,7 @@ function prepareImage(
 // AFFICHAGE TABLEAU IA
 // ==========================================
 
-function displayAiTable(data) {
+function displayAiTable(data, previewRows) {
 
     if (
         !data ||
@@ -2273,7 +2047,7 @@ function displayAiTable(data) {
             : [];
 
     rows.forEach(
-        function (row) {
+        function (row, rowIndex) {
 
             const tr =
                 document.createElement("tr");
@@ -2285,7 +2059,7 @@ function displayAiTable(data) {
                         document.createElement("td");
 
                     td.textContent =
-                        row[index] ?? "";
+                        previewRows?.[rowIndex]?.[index] ?? row[index] ?? "";
 
                     tr.appendChild(td);
                 }

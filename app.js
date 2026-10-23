@@ -114,6 +114,8 @@ let excelSyncGeneration = 0;
 let excelPreviewIsDraft = false;
 let excelDraftBase = null;
 let lastExcelSnapshot = null;
+let excelWriteBusy = false;
+let excelAppliedFingerprint = null;
 
 // ==========================================
 // DICTÉE VOCALE
@@ -1118,13 +1120,16 @@ if (!instruction) {
                     );
                 }
             }
-            displayAiTable(data);
-            previousTableData = tableBeforeModification;
-            excelPreviewIsDraft = Boolean(linkedExcelTable);
-            excelDraftBase = sourceFingerprint;
-
-            statusText.textContent =
-                "✅ Aperçu modifié. Clique sur Insérer pour créer cette nouvelle version dans Excel.";
+            if (linkedExcelTable) {
+                statusText.textContent = "📊 Mise à jour du tableau dans Excel...";
+                await updateLinkedExcelTable(data, sourceFingerprint);
+                previousTableData = tableBeforeModification;
+                statusText.textContent = "✅ Modification appliquée directement dans ton tableau Excel.";
+            } else {
+                displayAiTable(data);
+                previousTableData = tableBeforeModification;
+                statusText.textContent = "✅ Aperçu modifié. Insère le tableau une première fois pour le lier à Excel.";
+            }
 
         } catch (error) {
 
@@ -1146,6 +1151,18 @@ undoTableButton.addEventListener(
         if (linkedExcelTable) {
             try {
                 const snapshot = await readLinkedExcelTable();
+                if (!excelPreviewIsDraft && previousTableData) {
+                    const fingerprint = JSON.stringify(snapshot.data);
+                    if (fingerprint !== excelAppliedFingerprint) {
+                        throw new Error("Excel a changé depuis la dernière modification. Utilise Annuler dans Excel pour conserver ces changements.");
+                    }
+                    const restoreData = JSON.parse(JSON.stringify(previousTableData));
+                    undoTableButton.disabled = true;
+                    await updateLinkedExcelTable(restoreData, fingerprint);
+                    previousTableData = null;
+                    statusText.textContent = "↩ Dernière modification annulée dans Excel.";
+                    return;
+                }
                 excelPreviewIsDraft = false;
                 excelDraftBase = null;
                 previousTableData = null;
@@ -1154,6 +1171,8 @@ undoTableButton.addEventListener(
                 statusText.textContent = "↩ Aperçu rétabli depuis Excel.";
             } catch (error) {
                 statusText.textContent = "❌ " + error.message;
+            } finally {
+                undoTableButton.disabled = false;
             }
             return;
         }
@@ -1392,6 +1411,7 @@ function detachExcelTable() {
     excelPreviewIsDraft = false;
     excelDraftBase = null;
     lastExcelSnapshot = null;
+    excelAppliedFingerprint = null;
     rememberExcelTable();
 }
 
@@ -1437,46 +1457,296 @@ async function readLinkedExcelTable() {
         range.load("values,text,formulas,numberFormat");
         await context.sync();
 
-        const firstDataRow = table.showHeaders ? 1 : 0;
-        const endDataRow = range.values.length - (table.showTotals ? 1 : 0);
-        const values = range.values.slice(firstDataRow, endDataRow);
-        const displayRows = range.text.slice(firstDataRow, endDataRow);
-        const formulas = range.formulas.slice(firstDataRow, endDataRow);
-        const formats = range.numberFormat.slice(firstDataRow, endDataRow);
-        const oldColumns = reference.columns || [];
-        const names = headers.values[0] || [];
-        const columns = names.map(function (name, columnIndex) {
-            const oldColumn = oldColumns.find(column => column.name === String(name));
-            return {
-                name: String(name),
-                type: inferExcelColumnType(
-                    formats[0]?.[columnIndex],
-                    values.map(row => row[columnIndex]),
-                    oldColumn?.type
-                )
-                // Pas de formule de colonne ancienne : chaque cellule Excel
-                // est désormais la référence, y compris les exceptions manuelles.
-            };
-        });
-        const rows = values.map(function (row, rowIndex) {
-            return columns.map(function (column, columnIndex) {
-                const formula = formulas[rowIndex]?.[columnIndex];
-                if (typeof formula === "string" && formula.startsWith("=")) {
-                    return formula;
-                }
-                return row[columnIndex] ?? "";
-            });
-        });
+        return excelSnapshotFromRanges(reference, table, headers.values, range);
+    });
+}
+
+function excelSnapshotFromRanges(reference, table, headerValues, range) {
+    const firstDataRow = table.showHeaders ? 1 : 0;
+    const endDataRow = range.values.length - (table.showTotals ? 1 : 0);
+    const values = range.values.slice(firstDataRow, endDataRow);
+    const displayRows = range.text.slice(firstDataRow, endDataRow);
+    const formulas = range.formulas.slice(firstDataRow, endDataRow);
+    const formats = range.numberFormat.slice(firstDataRow, endDataRow);
+    const oldColumns = reference.columns || [];
+    const names = headerValues[0] || [];
+    const columns = names.map(function (name, columnIndex) {
+        const oldColumn = oldColumns.find(column => column.name === String(name));
         return {
-            data: {
-                title: reference.title || table.name,
-                columns: columns,
-                rows: rows,
-                summaryFormulas: reference.summaryFormulas || []
-            },
-            displayRows: displayRows
+            name: String(name),
+            type: inferExcelColumnType(
+                formats[0]?.[columnIndex],
+                values.map(row => row[columnIndex]),
+                oldColumn?.type
+            )
+            // Pas de formule de colonne ancienne : chaque cellule Excel
+            // est désormais la référence, y compris les exceptions manuelles.
         };
     });
+    const rows = values.map(function (row, rowIndex) {
+        return columns.map(function (column, columnIndex) {
+            const formula = formulas[rowIndex]?.[columnIndex];
+            if (typeof formula === "string" && formula.startsWith("=")) {
+                return formula;
+            }
+            return row[columnIndex] ?? "";
+        });
+    });
+    return {
+        data: {
+            title: reference.title || table.name,
+            columns: columns,
+            rows: rows,
+            summaryFormulas: reference.summaryFormulas || []
+        },
+        displayRows: displayRows
+    };
+}
+
+function validateExcelTableData(data) {
+    if (!data || !Array.isArray(data.columns) || !data.columns.length ||
+        !Array.isArray(data.rows) || data.rows.some(row => !Array.isArray(row))) {
+        throw new Error("La réponse IA ne contient pas un tableau valide.");
+    }
+    const names = data.columns.map(column => String(column?.name || "").trim());
+    if (names.some(name => !name) ||
+        new Set(names.map(name => name.toLowerCase())).size !== names.length) {
+        throw new Error("Chaque colonne doit avoir un nom unique et non vide.");
+    }
+    return names;
+}
+
+function excelCellIsEmpty(value) {
+    return value === "" || value === null || value === undefined;
+}
+
+function excelRectangleContains(rect, row, column) {
+    return row >= rect.row && row < rect.row + rect.height &&
+        column >= rect.column && column < rect.column + rect.width;
+}
+
+async function updateLinkedExcelTable(data, expectedFingerprint) {
+    const names = validateExcelTableData(data);
+    if (!linkedExcelTable || excelWriteBusy) {
+        throw new Error("Le tableau Excel n'est pas disponible pour la mise à jour.");
+    }
+    const reference = linkedExcelTable;
+    const generation = ++excelSyncGeneration;
+    excelWriteBusy = true;
+    clearTimeout(excelSyncTimer);
+    try {
+        let nextReference;
+        await Excel.run(async function (context) {
+            const table = context.workbook.tables.getItem(reference.id);
+            table.load("id,name,showHeaders,showTotals");
+            const sheet = table.worksheet;
+            const oldRange = table.getRange();
+            const header = table.getHeaderRowRange();
+            header.load("values");
+            oldRange.load("rowIndex,columnIndex,rowCount,columnCount,values,text,formulas,numberFormat");
+            await context.sync();
+            const current = excelSnapshotFromRanges(reference, table, header.values, oldRange);
+            if (JSON.stringify(current.data) !== expectedFingerprint ||
+                generation !== excelSyncGeneration || linkedExcelTable?.id !== reference.id) {
+                throw new Error("Excel a changé avant l'intégration. Relance ta demande.");
+            }
+            if (!table.showHeaders) {
+                throw new Error("Affiche la ligne d'en-têtes du tableau Excel avant de le modifier avec TableIA.");
+            }
+            const oldRect = {
+                row: oldRange.rowIndex, column: oldRange.columnIndex,
+                height: oldRange.rowCount, width: oldRange.columnCount
+            };
+            const rows = data.rows.length ? data.rows : [names.map(() => "")];
+            const nextRect = {
+                row: oldRect.row, column: oldRect.column,
+                height: rows.length + 1 + (table.showTotals ? 1 : 0), width: names.length
+            };
+            const resizing = nextRect.height !== oldRect.height || nextRect.width !== oldRect.width;
+            if (resizing && !Office.context.requirements.isSetSupported("ExcelApi", "1.13")) {
+                throw new Error("Cette version d'Excel ne permet pas le redimensionnement automatique. Mets Excel à jour pour ajouter ou supprimer des lignes et colonnes avec TableIA.");
+            }
+
+            // Les indicateurs créés sous le tableau sont déplacés avec lui.
+            // Seules les cellules encore identiques à celles de TableIA sont
+            // reconnues comme appartenant au complément.
+            const oldNames = header.values[0];
+            const oldDataCount = oldRect.height - 1 - (table.showTotals ? 1 : 0);
+            const oldSummaries = Array.isArray(reference.summaryCells)
+                ? reference.summaryCells
+                : (reference.summaryFormulas || []).flatMap(function (summary, index) {
+                    const column = oldNames.indexOf(summary.targetColumn);
+                    if (column < 0) return [];
+                    const row = oldRect.row + oldRect.height + 1 + index;
+                    return [{
+                        row: row, column: oldRect.column + column,
+                        labelColumn: column === 0 ? null : oldRect.column,
+                        label: summary.label || "Indicateur",
+                        formula: normalizeExcelFormula(summary.formula, {
+                            lastRow: oldRect.row + oldDataCount + 1
+                        })
+                    }];
+                });
+            const oldSummaryRanges = oldSummaries.map(function (summary) {
+                const value = sheet.getCell(summary.row, summary.column);
+                value.load("values,formulas");
+                const label = summary.labelColumn == null ? null : sheet.getCell(summary.row, summary.labelColumn);
+                if (label) label.load("values");
+                return {summary: summary, value: value, label: label};
+            });
+            const summaries = (Array.isArray(data.summaryFormulas) ? data.summaryFormulas : [])
+                .flatMap(function (summary, index) {
+                    const column = names.indexOf(summary.targetColumn);
+                    if (column < 0) return [];
+                    return [{
+                        row: nextRect.row + nextRect.height + 1 + index,
+                        column: nextRect.column + column,
+                        labelColumn: nextRect.column + (column === 0 ? 1 : 0),
+                        label: summary.label || "Indicateur",
+                        formula: normalizeExcelFormula(summary.formula, {
+                            lastRow: nextRect.row + rows.length + 1
+                        }),
+                        type: data.columns[column].type
+                    }];
+                });
+            const summaryDestinations = summaries.map(function (summary) {
+                const value = sheet.getCell(summary.row, summary.column);
+                const label = sheet.getCell(summary.row, summary.labelColumn);
+                value.load("values,formulas");
+                label.load("values,formulas");
+                return {summary: summary, value: value, label: label};
+            });
+            const target = sheet.getRangeByIndexes(nextRect.row, nextRect.column, nextRect.height, nextRect.width);
+            target.load("values,formulas");
+            const otherTables = sheet.tables;
+            otherTables.load("items/id");
+            await context.sync();
+            const otherRanges = otherTables.items.filter(item => item.id !== table.id).map(function (item) {
+                const range = item.getRange();
+                range.load("rowIndex,columnIndex,rowCount,columnCount");
+                return range;
+            });
+            await context.sync();
+            if (otherRanges.some(range =>
+                nextRect.row < range.rowIndex + range.rowCount &&
+                nextRect.row + nextRect.height > range.rowIndex &&
+                nextRect.column < range.columnIndex + range.columnCount &&
+                nextRect.column + nextRect.width > range.columnIndex)) {
+                throw new Error("Un autre tableau occupe l'espace nécessaire à l'intégration.");
+            }
+            const ownedCells = new Set();
+            const ownedRanges = [];
+            oldSummaryRanges.forEach(function (item) {
+                if (item.value.formulas[0][0] !== item.summary.formula ||
+                    (item.label && item.label.values[0][0] !== item.summary.label)) return;
+                ownedCells.add(item.summary.row + ":" + item.summary.column);
+                ownedRanges.push(item.value);
+                if (item.label) {
+                    ownedCells.add(item.summary.row + ":" + item.summary.labelColumn);
+                    ownedRanges.push(item.label);
+                }
+            });
+            function canReplace(row, column, value, formula) {
+                return excelRectangleContains(oldRect, row, column) ||
+                    ownedCells.has(row + ":" + column) ||
+                    (excelCellIsEmpty(value) && excelCellIsEmpty(formula));
+            }
+            target.values.forEach(function (row, rowIndex) {
+                row.forEach(function (value, columnIndex) {
+                    if (!canReplace(nextRect.row + rowIndex, nextRect.column + columnIndex,
+                        value, target.formulas[rowIndex][columnIndex])) {
+                        throw new Error("Des données à côté du tableau empêchent son agrandissement. Déplace-les puis relance ta demande.");
+                    }
+                });
+            });
+            summaryDestinations.forEach(function (item) {
+                for (const [column, cell] of [[item.summary.column, item.value], [item.summary.labelColumn, item.label]]) {
+                    if (!canReplace(item.summary.row, column, cell.values[0][0], cell.formulas[0][0]) ||
+                        otherRanges.some(range => excelRectangleContains({row:range.rowIndex,column:range.columnIndex,height:range.rowCount,width:range.columnCount},item.summary.row,column))) {
+                        throw new Error("Des données occupent la place des indicateurs. Déplace-les puis relance ta demande.");
+                    }
+                }
+            });
+            // Toutes les vérifications précèdent les écritures dans Excel.
+            oldRange.load("values,text,formulas,numberFormat");
+            header.load("values");
+            await context.sync();
+            if (JSON.stringify(excelSnapshotFromRanges(reference, table, header.values, oldRange).data) !== expectedFingerprint) {
+                throw new Error("Excel a changé pendant la préparation. Relance ta demande.");
+            }
+            if (generation !== excelSyncGeneration) throw new Error("Le tableau a changé.");
+            ownedRanges.forEach(range => range.clear("All"));
+            if (resizing) table.resize(target);
+            if (oldRect.height > nextRect.height) {
+                sheet.getRangeByIndexes(oldRect.row + nextRect.height, oldRect.column,
+                    oldRect.height - nextRect.height, oldRect.width).clear("All");
+            }
+            if (oldRect.width > nextRect.width) {
+                sheet.getRangeByIndexes(oldRect.row, oldRect.column + nextRect.width,
+                    Math.min(oldRect.height, nextRect.height), oldRect.width - nextRect.width).clear("All");
+            }
+            const matrix = [names, ...rows.map(row => names.map((_, index) =>
+                coerceExcelValue(row[index], data.columns[index].type)))];
+            sheet.getRangeByIndexes(nextRect.row, nextRect.column, matrix.length, names.length).values = matrix;
+            const formulaMatrix = matrix.slice(1).map(row => row.slice());
+            data.columns.forEach(function (column, columnIndex) {
+                const template = String(column.formula || "").trim();
+                const oldColumnIndex = oldNames.indexOf(names[columnIndex]);
+                rows.forEach(function (row, rowIndex) {
+                    const cell = sheet.getCell(nextRect.row + rowIndex + 1, nextRect.column + columnIndex);
+                    const value = row[columnIndex];
+                    const formula = template || (typeof value === "string" && value.startsWith("=") ? value : "");
+                    const originalFormat = oldColumnIndex < 0 ? null : oldRange.numberFormat[rowIndex + 1]?.[oldColumnIndex];
+                    const oldType = oldColumnIndex < 0 ? null : current.data.columns[oldColumnIndex]?.type;
+                    const keepFormat = !column.type || column.type === oldType;
+                    let format = (keepFormat && originalFormat) || excelNumberFormatForType(column.type);
+                    if (formula && format === "@") format = "General";
+                    cell.numberFormat = [[format]];
+                    if (formula) formulaMatrix[rowIndex][columnIndex] = normalizeExcelFormula(formula, {row: nextRect.row + rowIndex + 2});
+                });
+            });
+            // Une seule écriture du corps, avec ses formules ET ses constantes,
+            // évite qu'une formule isolée propage un calcul sur les exceptions.
+            sheet.getRangeByIndexes(nextRect.row + 1, nextRect.column, rows.length, names.length)
+                .formulas = formulaMatrix;
+            if (table.showTotals) {
+                const oldTotals = oldRange.formulas[oldRange.formulas.length - 1];
+                names.forEach(function (name, index) {
+                    const oldIndex = oldNames.indexOf(name);
+                    if (oldIndex >= 0) {
+                        sheet.getCell(nextRect.row + nextRect.height - 1, nextRect.column + index)
+                            .formulas = [[oldTotals[oldIndex]]];
+                    }
+                });
+            }
+            summaryDestinations.forEach(function (item) {
+                item.label.values = [[item.summary.label]];
+                item.value.formulas = [[item.summary.formula]];
+                item.value.numberFormat = [[excelNumberFormatForType(item.summary.type)]];
+                [item.label, item.value].forEach(function (cell) {
+                    cell.format.font.bold = true;
+                    cell.format.fill.color = "#E2F0D9";
+                });
+            });
+            await context.sync();
+            nextReference = {
+                ...reference, title: data.title || reference.title,
+                columns: data.columns.map((column, index) => ({name: names[index], type: column.type})),
+                summaryFormulas: data.summaryFormulas || [], summaryCells: summaries
+            };
+        });
+        linkedExcelTable = nextReference;
+        excelPreviewIsDraft = false;
+        excelDraftBase = null;
+        rememberExcelTable();
+        const snapshot = await readLinkedExcelTable();
+        displayAiTable(snapshot.data, snapshot.displayRows);
+        lastExcelSnapshot = JSON.stringify(snapshot);
+        excelAppliedFingerprint = JSON.stringify(snapshot.data);
+    } finally {
+        excelWriteBusy = false;
+        scheduleExcelRefresh();
+    }
 }
 
 function scheduleExcelRefresh(event) {
@@ -1488,7 +1758,7 @@ function scheduleExcelRefresh(event) {
 
 async function refreshExcelPreview() {
     if (!linkedExcelTable) return;
-    if (excelSyncBusy) {
+    if (excelSyncBusy || excelWriteBusy) {
         scheduleExcelRefresh();
         return;
     }
@@ -1508,7 +1778,7 @@ async function refreshExcelPreview() {
         const previewFingerprint = JSON.stringify(snapshot);
         if (previewFingerprint !== lastExcelSnapshot) {
             displayAiTable(snapshot.data, snapshot.displayRows);
-            previousTableData = null;
+            if (fingerprint !== excelAppliedFingerprint) previousTableData = null;
             lastExcelSnapshot = previewFingerprint;
         }
     } catch (error) {
@@ -1577,19 +1847,19 @@ insertExcelButton.addEventListener(
 
         try {
 
-            if (linkedExcelTable && !excelPreviewIsDraft) {
-                // Le second clic ne recrée pas une copie périmée du tableau.
-                const snapshot = await readLinkedExcelTable();
-                displayAiTable(snapshot.data, snapshot.displayRows);
-                lastExcelSnapshot = JSON.stringify(snapshot);
-                statusText.textContent = "✅ Tableau déjà lié. Modifie-le directement dans Excel.";
-                return;
-            }
-            if (linkedExcelTable && excelPreviewIsDraft) {
-                const snapshot = await readLinkedExcelTable();
-                if (JSON.stringify(snapshot.data) !== excelDraftBase) {
-                    throw new Error("Excel a changé. Clique sur Annuler et relance ta demande avant d'insérer.");
+            if (linkedExcelTable) {
+                if (excelPreviewIsDraft) {
+                    const before = await readLinkedExcelTable();
+                    await updateLinkedExcelTable(currentTableData, excelDraftBase);
+                    previousTableData = before.data;
+                    statusText.textContent = "✅ Modification appliquée dans le tableau Excel existant.";
+                } else {
+                    const snapshot = await readLinkedExcelTable();
+                    displayAiTable(snapshot.data, snapshot.displayRows);
+                    lastExcelSnapshot = JSON.stringify(snapshot);
+                    statusText.textContent = "✅ Tableau déjà lié. Modifie-le directement dans Excel.";
                 }
+                return;
             }
             const insertionData = JSON.parse(JSON.stringify(currentTableData));
             let insertedReference = null;
@@ -1761,14 +2031,21 @@ insertExcelButton.addEventListener(
                             } else {
                                 // Les formules relues d'Excel sont portées par
                                 // les cellules, pour respecter les exceptions.
+                                const hasCellFormula = rows.some(function (row) {
+                                    return typeof row[columnIndex] === "string" && row[columnIndex].startsWith("=");
+                                });
+                                if (hasCellFormula) {
                                 rows.forEach(function (row, rowIndex) {
                                     const value = row[columnIndex];
                                     if (typeof value === "string" && value.startsWith("=")) {
                                         const cell = sheet.getCell(rowIndex + 1, columnIndex);
                                         cell.numberFormat = [[numberFormat === "@" ? "General" : numberFormat]];
-                                        cell.formulas = [[value]];
                                     }
                                 });
+                                columnRange.formulas = rows.map(function (row) {
+                                    return [coerceExcelValue(row[columnIndex], column.type)];
+                                });
+                                }
                             }
                         }
                     );
@@ -1857,7 +2134,15 @@ insertExcelButton.addEventListener(
                         id: table.id,
                         title: insertionData.title || table.name,
                         columns: insertionData.columns.map(column => ({name: column.name, type: column.type})),
-                        summaryFormulas: insertionData.summaryFormulas || []
+                        summaryFormulas: insertionData.summaryFormulas || [],
+                        summaryCells: summaries.flatMap(function (summary, index) {
+                            const column = headers.indexOf(summary.targetColumn);
+                            if (column < 0) return [];
+                            return [{row: dataRowCount + 2 + index, column: column,
+                                labelColumn: column === 0 ? null : 0,
+                                label: summary.label || "Indicateur",
+                                formula: normalizeExcelFormula(summary.formula, {lastRow: dataRowCount + 1})}];
+                        })
                     };
                 }
             );

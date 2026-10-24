@@ -958,7 +958,7 @@ cameraButton.addEventListener(
         // la solution la plus directe et déjà validée.
         if (
             isMobileCaptureDevice ||
-            !isEmbeddedInOffice
+            (!isEmbeddedInOffice && (typeof Office === "undefined" || !Office.context?.host))
         ) {
             return;
         }

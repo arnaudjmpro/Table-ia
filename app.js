@@ -699,6 +699,8 @@ clearPromptButton.addEventListener(
     "click",
     function () {
 
+                cancelExternalCamera();
+        
         textPrompt.value =
             "";
 
@@ -787,6 +789,90 @@ function dataUrlToPhotoFile(dataUrl) {
         }
     );
 }
+
+const PHOTO_BRIDGE_URL = new URL("tableia-photo-bridge", SUPABASE_FUNCTION_URL).href;
+let externalCameraSession = null;
+
+async function requestPhotoBridge(action, sessionId, signal) {
+    const response = await fetch(PHOTO_BRIDGE_URL, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            apikey: SUPABASE_PUBLISHABLE_KEY,
+            Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
+        },
+        body: JSON.stringify({action, sessionId}),
+        signal,
+        keepalive: action === "cancel"
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Le transfert de la photo est indisponible.");
+    return result;
+}
+
+function cancelExternalCamera() {
+    const session = externalCameraSession;
+    if (!session) return;
+    externalCameraSession = null;
+    clearTimeout(session.timer);
+    clearTimeout(session.timeout);
+    session.controller.abort();
+    requestPhotoBridge("cancel", session.id).catch(function () {});
+}
+
+async function openExternalOfficeCamera() {
+    if (typeof Office.context.ui?.openBrowserWindow !== "function") {
+        throw new Error("L'ouverture de la caméra dans le navigateur n'est pas disponible. Utilise Choisir dans la galerie.");
+    }
+    cancelExternalCamera();
+    const session = {
+        id: Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, "0")).join(""),
+        controller: new AbortController(),
+        expiresAt: Date.now() + 9 * 60 * 1000,
+        timer: null,
+        timeout: null
+    };
+    externalCameraSession = session;
+    const url = new URL("dialog-camera.html", window.location.href);
+    url.searchParams.set("external", "1");
+    url.searchParams.set("session", session.id);
+    function fail(error) {
+        if (externalCameraSession !== session) return;
+        cancelExternalCamera();
+        statusText.textContent = "❌ Photo : " + error.message;
+    }
+    async function poll() {
+        try {
+            if (externalCameraSession !== session) return;
+            if (Date.now() >= session.expiresAt) throw new Error("Le délai de prise de photo est dépassé. Clique de nouveau sur Prendre une photo.");
+            const result = await requestPhotoBridge("poll", session.id, session.controller.signal);
+            if (externalCameraSession !== session) return;
+            if (Date.now() >= session.expiresAt) throw new Error("Le délai de prise de photo est dépassé. Clique de nouveau sur Prendre une photo.");
+            if (result.status === "ready") {
+                const file = dataUrlToPhotoFile("data:" + result.imageMimeType + ";base64," + result.imageBase64);
+                handleSelectedPhoto(file);
+            } else if (result.status === "waiting") {
+                session.timer = setTimeout(poll, 1500);
+            } else {
+                throw new Error("La réponse du service photo n'est pas reconnue.");
+            }
+        } catch (error) { fail(error); }
+    }
+    try {
+        // Ouvrir pendant le clic ; create accepte aussi une photo déjà envoyée.
+        Office.context.ui.openBrowserWindow(url.href);
+        statusText.textContent = "📷 Prends la photo dans le navigateur puis reviens dans Excel. Elle sera récupérée automatiquement.";
+        session.timeout = setTimeout(function () {
+            fail(new Error("Le délai de prise de photo est dépassé. Clique de nouveau sur Prendre une photo."));
+        }, 9 * 60 * 1000);
+        const result = await requestPhotoBridge("create", session.id, session.controller.signal);
+        if (externalCameraSession !== session) return;
+        if (result.status !== "created") throw new Error("La session photo n'a pas pu être préparée.");
+        await poll();
+    } catch (error) { fail(error); }
+}
+
+window.addEventListener("beforeunload", cancelExternalCamera);
 
 function openOfficeCameraDialog() {
     if (
@@ -931,6 +1017,8 @@ function handleSelectedPhoto(file) {
         return;
     }
 
+    cancelExternalCamera();
+    
     selectedPhoto =
         file;
 
@@ -953,7 +1041,7 @@ clearPromptButton.style.display =
 
 cameraButton.addEventListener(
     "click",
-    function (event) {
+      async function (event) {
         // Sur téléphone et tablette, le champ capture natif reste
         // la solution la plus directe et déjà validée.
         if (
@@ -968,7 +1056,11 @@ cameraButton.addEventListener(
         event.preventDefault();
 
         try {
-            openOfficeCameraDialog();
+                        if (Office.context.platform === "Mac") {
+                await openExternalOfficeCamera();
+            } else {
+                openOfficeCameraDialog();
+            }
         } catch (error) {
             console.error(error);
 

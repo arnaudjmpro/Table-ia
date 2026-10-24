@@ -46,7 +46,7 @@ const deleteTableButton =
 const insertExcelButton =
     document.getElementById("insertExcelButton");
 
-const isEmbeddedInOffice =
+let isEmbeddedInOffice =
     window.self !== window.top;
 
 const isMobileCaptureDevice =
@@ -68,7 +68,6 @@ let officeInitialization =
 // l'utilisateur appuie sur le bouton, la demande de permission est appelée
 // directement depuis le clic, sans attente préalable qui invaliderait le geste.
 if (
-    isEmbeddedInOffice &&
     typeof Office !== "undefined"
 ) {
     officeInitialization =
@@ -77,7 +76,8 @@ if (
                 officeReadyInfo =
                     info;
 
-                return info;
+        isEmbeddedInOffice = Boolean(info?.host);
+        return isEmbeddedInOffice ? info : null;
             })
             .catch(function (error) {
                 officeReadyError =

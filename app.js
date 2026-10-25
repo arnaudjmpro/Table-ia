@@ -2396,8 +2396,6 @@ function worksheetCellYear(value, column, epochOffset) {
         : new Date(days * 86400000).getUTCFullYear();
     }
 
-}
-
 function uniqueWorksheetName(requested, names) {
     const base = String(requested || "Nouvelle feuille").replace(/[\\/:?*\[\]]/g, " ")
         .trim().slice(0, 31).replace(/^'+|'+$/g, "").trim() || "Nouvelle feuille";

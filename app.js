@@ -103,6 +103,7 @@ textPrompt.addEventListener(
 );
 
 let selectedPhoto = null;
+let worksheetInterpretationBusy = false;
 let currentTableData = null;
 let previousTableData = null;
 let cameraDialog = null;
@@ -572,14 +573,8 @@ if (SpeechRecognition || isEmbeddedInOffice) {
     "click",
     async function () {
 
-                if (excelTableOperationBusy) return;
-
-        const sheetRequest = parseWorksheetRequest(textPrompt.value);
-
-        if (sheetRequest) {
-            await executeWorksheetRequest(sheetRequest);
-            return;
-        }
+        if (excelTableOperationBusy || worksheetInterpretationBusy) return;
+        if (await interpretWorksheetRequest()) return;
 
         if (isEmbeddedInOffice && typeof Excel !== "undefined") {
             textAnalyzeButton.disabled = true;
@@ -1935,68 +1930,472 @@ function worksheetPromptText(value) {
         .toLowerCase().replace(/[’']/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function parseWorksheetRequest(prompt) {
-    const text = String(prompt || "").trim();
-    const normalized = worksheetPromptText(text);
-    const command = /\b(?:cree(?:r|z)?|ajoute(?:r|z)?)[\s-]+(?:moi\s+)?(?:(?:une?|la|le|nouvelle?|nouveau|deuxieme|seconde?)\s+)*(?:feuille|onglet)(?=\s|\d|[.!?]|$)/i.exec(normalized);
-    if (!command) return /\b(?:cree(?:r|z)?|ajoute(?:r|z)?)\s+(?:deux|trois|\d+)\s+(?:nouvelles?\s+)?(?:feuilles?|onglets?)\b/.test(normalized)
-        ? {error:"Demande la création d'une seule feuille à la fois."} : null;
-    const prefix = normalized.slice(Math.max(0, command.index - 70), command.index).split(/[,;.!?]|\bmais\b/).at(-1);
-    if (/\b(?:ne|n)\b.*\b(?:pas|jamais)\b|\b(?:ne|n)\s*$|\b(?:sans|evite(?:r|z)?)\s+(?:de\s+)?$/.test(prefix)) return null;
-    let name = "";
-    const naming = /\b(?:nomm[eé]e?|appel[eé]e?|intitul[eé]e?)\s+(?:"([^"]+)"|«([^»]+)»|([^.!?\n]+))/i.exec(text);
-    let rest = normalized.slice(command.index + command[0].length).trim();
-    if (naming) {
-        name = (naming[1] || naming[2] || naming[3].split(/\s+(?:avec|pour|et|sans|en\s+copiant|[aà]\s+partir|contenant)\b/i)[0]).trim();
-        const declaration = worksheetPromptText(naming[0].slice(0, naming[0].indexOf(name) + name.length));
-        rest = rest.replace(declaration, "").replace(/["«»]/g, " ").trim();
+async function interpretWorksheetRequest() {
+    const prompt = textPrompt.value.trim();
+    if (!prompt) return false;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45000);
+
+    worksheetInterpretationBusy = true;
+    updateTableActionButton();
+
+    try {
+        await officeInitialization;
+
+        if (isEmbeddedInOffice && typeof Excel !== "undefined") {
+            if (!await detectActiveExcelTable()) {
+                throw new Error(
+                    "Lecture d'Excel en cours. Relance ta demande."
+                );
+            }
+        }
+
+        excelTableOperationBusy = true;
+        updateTableActionButton();
+
+        if (excelPreviewIsDraft) {
+            throw new Error(
+                "Valide ou annule d'abord la proposition en cours."
+            );
+        }
+
+        const sourceReference = linkedExcelTable
+            ? JSON.parse(JSON.stringify(linkedExcelTable))
+            : null;
+
+        const snapshot = sourceReference
+            ? await readLinkedExcelTable(sourceReference)
+            : null;
+
+        const fingerprint = snapshot ? JSON.stringify(snapshot) : null;
+        const generation = excelSyncGeneration;
+        const selection = excelDetectionRequest;
+        const photo = selectedPhoto;
+
+        statusText.textContent =
+            "✨ Interprétation de ta demande par l'IA...";
+
+        const response = await fetch(SUPABASE_FUNCTION_URL, {
+            method: "POST",
+            signal: controller.signal,
+
+            headers: {
+                "Content-Type": "application/json",
+                apikey: SUPABASE_PUBLISHABLE_KEY,
+                Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
+            },
+
+            body: JSON.stringify({
+                mode: "interpret",
+                prompt,
+
+                excelContext: {
+                    hasTable: Boolean(sourceReference),
+                    selectionRequired: excelTableSelectionRequired,
+                    hasImage: Boolean(photo),
+                    title: snapshot?.data.title || "",
+                    rowCount: snapshot?.data.rows.length || 0,
+
+                    columns: (snapshot?.data.columns || []).map(
+                        (column, i) => ({
+                            name: column.name,
+                            type: column.type,
+
+                            examples: [...new Set(
+                                snapshot.displayRows.map(row =>
+                                    String(row[i] ?? "").slice(0, 160)
+                                )
+                            )].filter(Boolean).slice(0, 20)
+                        })
+                    )
+                }
+            })
+        });
+
+        const plan = await response.json();
+
+        if (!response.ok) {
+            throw new Error(
+                plan.error || "Interprétation IA indisponible."
+            );
+        }
+
+        validateWorksheetPlan(plan, snapshot?.data.columns || []);
+
+        if (
+            textPrompt.value.trim() !== prompt ||
+            selectedPhoto !== photo ||
+            generation !== excelSyncGeneration ||
+            selection !== excelDetectionRequest
+        ) {
+            throw new Error(
+                "La demande ou le contexte Excel a changé. Relance ta demande."
+            );
+        }
+
+        if (
+            snapshot &&
+            JSON.stringify(
+                await readLinkedExcelTable(sourceReference)
+            ) !== fingerprint
+        ) {
+            throw new Error(
+                "Le tableau Excel a changé pendant l'analyse. Relance ta demande."
+            );
+        }
+
+        if (plan.action === "clarify") {
+            statusText.textContent = "❓ " + plan.message;
+            return true;
+        }
+
+        if (plan.action === "continue") return false;
+
+        if (photo) {
+            throw new Error(
+                "Pour cette extraction, retire l'image jointe et utilise le tableau Excel source."
+            );
+        }
+
+        if (
+            !plan.empty &&
+            (!sourceReference || excelTableSelectionRequired)
+        ) {
+            throw new Error(
+                "Clique dans le tableau source, puis relance ta demande."
+            );
+        }
+
+        excelTableOperationBusy = false;
+
+        await executeWorksheetRequest({
+            ...plan,
+            sourceReference,
+            fingerprint
+        });
+
+        return true;
+
+    } catch (error) {
+        statusText.textContent =
+            "❌ " +
+            (error?.message ||
+                "Interprétation impossible. Relance ta demande.");
+
+        return true;
+
+    } finally {
+        clearTimeout(timeout);
+        excelTableOperationBusy = false;
+        worksheetInterpretationBusy = false;
+        updateTableActionButton();
+        scheduleExcelDetection();
     }
-    const numbered = /^\s*(\d+)\b/.exec(rest);
-    if (numbered) {
-        if (!name) name = "Feuille " + numbered[1];
-        rest = rest.slice(numbered[0].length).trim();
-    }
-    const years = rest.match(/\b(?:19|20|21)\d{2}\b/g) || [];
-    const empty = /\bvide\b/.test(rest);
-    const copy = /\b(?:copi\w*|dupliqu\w*|reprend\w*|reprodui\w*)\b/.test(rest);
-    const error = years.length > 1 ? "Précise une seule année pour cette nouvelle feuille."
-        : empty && (years.length || copy || /\b(?:avec|contenant)\b/.test(rest)) ? "Précise si tu veux une feuille vide ou une copie des données."
-        : !empty && !years.length && !copy ? "Précise : une feuille vide, une copie du tableau, ou les lignes d'une année."
-        : "";
-    return {name, rest, empty, year: years.length === 1 ? Number(years[0]) : null, error};
 }
 
-function worksheetRequestResidual(request, columnName = "") {
-    let rest = request.rest;
-    if (columnName) rest = rest.split(worksheetPromptText(columnName)).join(" ");
-    if (request.year != null) rest = rest.replace(String(request.year), " ");
-    const allowed = /\b(?:vide|avec|pour|contenant|en|copiant|copie|copier|duplique|dupliquer|reprends|reprendre|reproduis|reproduire|et|les|des|le|la|du|de|d|l|mes|nos|ces|ce|cette|adherents?|lignes?|donnees|enregistrements?|entrees|clients?|ventes?|commandes?|factures?|produits?|tableau|dont|est|egale|a|annee|uniquement|seulement|tout|toute|tous|toutes|entier|entiere|actuel|actuelle|actuels|actuelles|source|selectionne|selectionnee)\b/g;
-    return rest.replace(allowed, " ").replace(/[\s.,;:!?«»"()\-]/g, "");
+function validateWorksheetPlan(plan, columns) {
+    const fail = () => {
+        throw new Error(
+            "Le plan IA est invalide ou non pris en charge. Reformule la demande."
+        );
+    };
+
+    if (
+        !plan ||
+        !["continue", "create_sheet", "clarify"].includes(plan.action) ||
+        typeof plan.name !== "string" ||
+        typeof plan.message !== "string" ||
+        typeof plan.empty !== "boolean" ||
+        !["all", "any"].includes(plan.match) ||
+        !Array.isArray(plan.filters) ||
+        plan.filters.length > 12
+    ) {
+        fail();
+    }
+
+    if (plan.action !== "create_sheet") {
+        if (
+            plan.name !== "" ||
+            plan.empty ||
+            plan.match !== "all" ||
+            plan.filters.length ||
+            (
+                plan.action === "clarify"
+                    ? !plan.message.trim()
+                    : plan.message !== ""
+            )
+        ) {
+            fail();
+        }
+
+        return [];
+    }
+
+    if (
+        plan.message !== "" ||
+        (plan.empty && plan.filters.length)
+    ) {
+        fail();
+    }
+
+    return plan.filters.map(filter => {
+        const index = columns.findIndex(
+            column => column.name === filter?.column
+        );
+
+        const operator = filter?.operator;
+
+        if (
+            index < 0 ||
+            typeof filter?.value !== "string" ||
+            ![
+                "eq", "neq", "contains",
+                "gt", "gte", "lt", "lte",
+                "year_eq", "is_empty", "is_not_empty"
+            ].includes(operator)
+        ) {
+            fail();
+        }
+
+        const type = columns[index].type;
+
+        if (
+            !["is_empty", "is_not_empty"].includes(operator) &&
+            !filter.value.trim()
+        ) {
+            fail();
+        }
+
+        if (
+            operator === "year_eq" &&
+            !/^(?:19|20|21)\d{2}$/.test(filter.value)
+        ) {
+            fail();
+        }
+
+        if (
+            operator === "year_eq" &&
+            (
+                type === "boolean" ||
+                (
+                    ["number", "currency", "percentage"].includes(type) &&
+                    !/\bannee\b/.test(
+                        worksheetPromptText(columns[index].name)
+                    )
+                )
+            )
+        ) {
+            fail();
+        }
+
+        if (
+            ["is_empty", "is_not_empty"].includes(operator) &&
+            filter.value !== ""
+        ) {
+            fail();
+        }
+
+        if (["gt", "gte", "lt", "lte"].includes(operator)) {
+            if (type === "date") {
+                if (worksheetDateValue(filter.value, 0) == null) {
+                    fail();
+                }
+            } else if (
+                !["number", "currency", "percentage"].includes(type) ||
+                !/^-?\d+(?:\.\d+)?$/.test(filter.value) ||
+                !Number.isFinite(Number(filter.value))
+            ) {
+                fail();
+            }
+        }
+
+        if (
+            ["eq", "neq"].includes(operator) &&
+            ["number", "currency", "percentage"].includes(type) &&
+            (
+                !/^-?\d+(?:\.\d+)?$/.test(filter.value) ||
+                !Number.isFinite(Number(filter.value))
+            )
+        ) {
+            fail();
+        }
+
+        if (
+            ["eq", "neq"].includes(operator) &&
+            type === "date" &&
+            worksheetDateValue(filter.value, 0) == null
+        ) {
+            fail();
+        }
+
+        if (
+            ["eq", "neq"].includes(operator) &&
+            type === "boolean" &&
+            !["true", "false"].includes(filter.value)
+        ) {
+            fail();
+        }
+
+        if (
+            operator === "contains" &&
+            !["text", "status"].includes(type)
+        ) {
+            fail();
+        }
+
+        return {...filter, index};
+    });
 }
 
-function worksheetYearColumn(request, columns) {
-    const candidates = columns.map((column, index) => ({...column, index}))
-        .filter(column => column.type === "date" || /\b(?:date|annee)\b/.test(worksheetPromptText(column.name)));
-    const explicit = candidates.filter(column => request.rest.includes(worksheetPromptText(column.name)));
-    const adhesion = candidates.filter(column => /adhesion/.test(worksheetPromptText(column.name)));
-    const chosen = explicit.length === 1 ? explicit[0]
-        : !explicit.length && /\badherents?\b/.test(request.rest) && adhesion.length === 1 ? adhesion[0]
-        : !explicit.length && candidates.length === 1 ? candidates[0] : null;
-    if (!chosen) throw new Error(candidates.length
-        ? "Précise la colonne de date à utiliser : " + candidates.map(column => column.name).join(", ") + "."
-        : "Aucune colonne de date ou d'année n'a été trouvée dans ce tableau.");
-    return chosen;
+function worksheetDateValue(value, epochOffset) {
+    if (
+        typeof value === "number" &&
+        Number.isFinite(value)
+    ) {
+        return Math.floor(value + epochOffset - 25569);
+    }
+
+    const text = String(value ?? "").trim();
+
+    const iso =
+        /^(\d{4})-(\d{2})-(\d{2})(?:T.*)?$/.exec(text);
+
+    const french =
+        /^(\d{1,2})[/.](\d{1,2})[/.](\d{4})$/.exec(text);
+
+    if (!iso && !french) return null;
+
+    const [year, month, day] = iso
+        ? iso.slice(1, 4).map(Number)
+        : [
+            Number(french[3]),
+            Number(french[2]),
+            Number(french[1])
+        ];
+
+    const date = new Date(Date.UTC(year, month - 1, day));
+
+    return (
+        date.getUTCFullYear() === year &&
+        date.getUTCMonth() === month - 1 &&
+        date.getUTCDate() === day
+    )
+        ? date.getTime() / 86400000
+        : null;
+}
+
+function worksheetMatchesPlan(
+    row,
+    filters,
+    match,
+    columns,
+    epochOffset
+) {
+    const matches = filters.map(filter => {
+        const raw = row[filter.index];
+        const empty = raw === "" || raw == null;
+
+        if (filter.operator === "is_empty") return empty;
+        if (filter.operator === "is_not_empty") return !empty;
+        if (empty) return false;
+
+        const column = columns[filter.index];
+
+        if (filter.operator === "year_eq") {
+            return worksheetCellYear(
+                raw,
+                column,
+                epochOffset
+            ) === Number(filter.value);
+        }
+
+        let left, right;
+
+        if (column.type === "date") {
+            left = worksheetDateValue(raw, epochOffset);
+            right = worksheetDateValue(filter.value, 0);
+
+            if (left == null || right == null) return false;
+
+        } else if (
+            ["number", "currency", "percentage"].includes(column.type)
+        ) {
+            if (
+                typeof raw !== "number" ||
+                !Number.isFinite(raw)
+            ) {
+                return false;
+            }
+
+            left = raw;
+            right = Number(filter.value);
+
+        } else if (column.type === "boolean") {
+            left = raw === true || raw === 1
+                ? "true"
+                : raw === false || raw === 0
+                    ? "false"
+                    : worksheetPromptText(raw);
+
+            right = filter.value;
+
+        } else {
+            left = worksheetPromptText(raw);
+            right = worksheetPromptText(filter.value);
+        }
+
+        switch (filter.operator) {
+            case "eq":
+                return left === right;
+
+            case "neq":
+                return left !== right;
+
+            case "contains":
+                return left.includes(right);
+
+            case "gt":
+                return left > right;
+
+            case "gte":
+                return left >= right;
+
+            case "lt":
+                return left < right;
+
+            case "lte":
+                return left <= right;
+
+            default:
+                return false;
+        }
+    });
+
+    return !filters.length || (
+        match === "all"
+            ? matches.every(Boolean)
+            : matches.some(Boolean)
+    );
 }
 
 function worksheetCellYear(value, column, epochOffset) {
     if (value == null || value === "") return null;
-    if (/\bannee\b/.test(worksheetPromptText(column.name)) && /^\d{4}$/.test(String(value))) return Number(value);
-    if (typeof value === "number" && Number.isFinite(value)) {
-        return new Date((value + epochOffset - 25569) * 86400000).getUTCFullYear();
+
+    if (
+        /\bannee\b/.test(worksheetPromptText(column.name)) &&
+        /^\d{4}$/.test(String(value))
+    ) {
+        return Number(value);
     }
-    const text = String(value).trim();
-    const match = /^(\d{4})[-/]/.exec(text) || /^\d{1,2}[-/.]\d{1,2}[-/.](\d{4})(?:\s|$)/.exec(text);
-    return match ? Number(match[1]) : null;
+
+    const days = worksheetDateValue(value, epochOffset);
+
+    return days == null
+        ? null
+        : new Date(days * 86400000).getUTCFullYear();
+    }
+
 }
 
 function uniqueWorksheetName(requested, names) {
@@ -2016,7 +2415,13 @@ async function executeWorksheetRequest(request) {
     excelTableOperationBusy = true;
     updateTableActionButton();
     try {
-        if (request.error) throw new Error(request.error);
+        if (request.action !== "create_sheet") {
+            throw new Error("Action de création de feuille attendue.");
+        }
+
+        if (request.empty) {
+            validateWorksheetPlan(request, []);
+        }
         const info = await officeInitialization;
         if (!info || typeof Excel === "undefined") throw new Error("Ouvre TableIA depuis Excel pour créer une feuille.");
         if (!request.empty && !Office.context.requirements.isSetSupported("ExcelApi", "1.9")) throw new Error("Cette version d'Excel ne permet pas la copie du tableau vers une nouvelle feuille.");
@@ -2046,19 +2451,50 @@ async function executeWorksheetRequest(request) {
                 const epoch = context.workbook.functions.date(2000, 1, 1);
                 epoch.load("value");
                 await context.sync();
-                columns = excelSnapshotFromRanges({columns:[],title:table.name}, table, headers.values, range).data.columns;
-                const filterColumn = request.year == null ? null : worksheetYearColumn(request, columns);
-                if (worksheetRequestResidual(request, filterColumn?.name)) throw new Error("Cette première version accepte une copie du tableau ou un filtre par année. Précise une seule condition de date.");
+                                if (table.id !== request.sourceReference?.id) {
+                    throw new Error("Le tableau sélectionné a changé. Relance ta demande.");
+                }
+
+                const snapshot = excelSnapshotFromRanges(
+                    request.sourceReference,
+                    table,
+                    headers.values,
+                    range
+                );
+
+                if (JSON.stringify(snapshot) !== request.fingerprint) {
+                    throw new Error("Le tableau source a changé. Relance ta demande.");
+                }
+
+                columns = snapshot.data.columns;
+                const filters = validateWorksheetPlan(request, columns);
+
                 offset = table.showHeaders ? 1 : 0;
                 const end = range.values.length - (table.showTotals ? 1 : 0);
-                indexes = Array.from({length:Math.max(0, end - offset)}, (_, i) => i + offset)
-                    .filter(i => !filterColumn || worksheetCellYear(range.values[i][filterColumn.index], filterColumn, epoch.value === 35064 ? 1462 : 0) === request.year);
-                if (!indexes.length) throw new Error(request.year == null ? "Le tableau source ne contient aucune ligne à copier." : "Aucune ligne ne correspond à l'année " + request.year + ". Aucune feuille créée.");
+
+                indexes = Array.from(
+                    {length: Math.max(0, end - offset)},
+                    (_, i) => i + offset
+                ).filter(i =>
+                    worksheetMatchesPlan(
+                        range.values[i],
+                        filters,
+                        request.match,
+                        columns,
+                        epoch.value === 35064 ? 1462 : 0
+                    )
+                );
+
+                if (!indexes.length) {
+                    throw new Error(
+                        "Aucune ligne ne correspond à la demande. Aucune feuille créée."
+                    );
+                }
             } else {
-                if (worksheetRequestResidual(request)) throw new Error("Pour une feuille vide, indique seulement son nom, par exemple : Crée une feuille vide nommée Budget.");
+            
                 await context.sync();
             }
-            const name = uniqueWorksheetName(request.name || (request.empty ? "Nouvelle feuille" : request.year == null ? "Copie tableau" : "Extraction " + request.year), sheets.items.map(item => item.name));
+            const name = uniqueWorksheetName(request.name || "Nouvelle feuille", sheets.items.map(item => item.name));
             const destination = sheets.add(name);
             let reference = null;
             if (!request.empty) {
@@ -2110,17 +2546,20 @@ async function executeWorksheetRequest(request) {
 }
 
 function updateTableActionButton() {
-    const sheetRequest = parseWorksheetRequest(textPrompt.value);
+    const hasPrompt = Boolean(textPrompt.value.trim());
 
-    textAnalyzeButton.textContent = sheetRequest
-        ? "✨ CRÉER LA FEUILLE"
-        : currentTableData || excelTableSelectionRequired
-            ? "✨ MODIFIER LE TABLEAU"
-            : "✨ CRÉER LE TABLEAU";
+    textAnalyzeButton.textContent = worksheetInterpretationBusy
+        ? "✨ ANALYSE EN COURS..."
+        : hasPrompt
+            ? "✨ ANALYSER LA DEMANDE"
+            : currentTableData || excelTableSelectionRequired
+                ? "✨ MODIFIER LE TABLEAU"
+                : "✨ CRÉER LE TABLEAU";
 
     textAnalyzeButton.disabled =
         excelTableOperationBusy ||
-        (!sheetRequest && excelTableSelectionRequired);
+        worksheetInterpretationBusy ||
+        (!hasPrompt && excelTableSelectionRequired);
 }
 
 function clearDetectedExcelTable(message, force = false) {

@@ -93,10 +93,12 @@ clearPromptButton.style.display =
 textPrompt.addEventListener(
     "input",
     function () {
-clearPromptButton.style.display =
-    textPrompt.value.trim() || selectedPhoto
-        ? "block"
-        : "none";
+        clearPromptButton.style.display =
+            textPrompt.value.trim() || selectedPhoto
+                ? "block"
+                : "none";
+
+        updateTableActionButton();
     }
 );
 
@@ -196,7 +198,8 @@ if (SpeechRecognition || isEmbeddedInOffice) {
             currentText
                 ? currentText + " " + cleanTranscript
                 : cleanTranscript;
-
+                updateTableActionButton();
+        
         clearPromptButton.style.display =
             "block";
     }
@@ -569,7 +572,15 @@ if (SpeechRecognition || isEmbeddedInOffice) {
     "click",
     async function () {
 
-        if (excelTableOperationBusy) return;
+                if (excelTableOperationBusy) return;
+
+        const sheetRequest = parseWorksheetRequest(textPrompt.value);
+
+        if (sheetRequest) {
+            await executeWorksheetRequest(sheetRequest);
+            return;
+        }
+
         if (isEmbeddedInOffice && typeof Excel !== "undefined") {
             textAnalyzeButton.disabled = true;
             try {
@@ -724,6 +735,7 @@ clearPromptButton.style.display =
         
         statusText.textContent =
             "🧹 Demande effacée.";
+                updateTableActionButton();
         setTimeout(
     function () {
         if (
@@ -1918,15 +1930,201 @@ async function refreshExcelPreview() {
     }
 }
 
-function updateTableActionButton() {
-    textAnalyzeButton.textContent = currentTableData || excelTableSelectionRequired
-        ? "✨ MODIFIER LE TABLEAU"
-        : "✨ CRÉER LE TABLEAU";
-    textAnalyzeButton.disabled = excelTableOperationBusy || excelTableSelectionRequired;
+function worksheetPromptText(value) {
+    return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase().replace(/[’']/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function clearDetectedExcelTable(message) {
-    if (linkedExcelTable || excelTableSelectionRequired) {
+function parseWorksheetRequest(prompt) {
+    const text = String(prompt || "").trim();
+    const normalized = worksheetPromptText(text);
+    const command = /\b(?:cree(?:r|z)?|ajoute(?:r|z)?)[\s-]+(?:moi\s+)?(?:(?:une?|la|le|nouvelle?|nouveau|deuxieme|seconde?)\s+)*(?:feuille|onglet)(?=\s|\d|[.!?]|$)/i.exec(normalized);
+    if (!command) return /\b(?:cree(?:r|z)?|ajoute(?:r|z)?)\s+(?:deux|trois|\d+)\s+(?:nouvelles?\s+)?(?:feuilles?|onglets?)\b/.test(normalized)
+        ? {error:"Demande la création d'une seule feuille à la fois."} : null;
+    const prefix = normalized.slice(Math.max(0, command.index - 70), command.index).split(/[,;.!?]|\bmais\b/).at(-1);
+    if (/\b(?:ne|n)\b.*\b(?:pas|jamais)\b|\b(?:ne|n)\s*$|\b(?:sans|evite(?:r|z)?)\s+(?:de\s+)?$/.test(prefix)) return null;
+    let name = "";
+    const naming = /\b(?:nomm[eé]e?|appel[eé]e?|intitul[eé]e?)\s+(?:"([^"]+)"|«([^»]+)»|([^.!?\n]+))/i.exec(text);
+    let rest = normalized.slice(command.index + command[0].length).trim();
+    if (naming) {
+        name = (naming[1] || naming[2] || naming[3].split(/\s+(?:avec|pour|et|sans|en\s+copiant|[aà]\s+partir|contenant)\b/i)[0]).trim();
+        const declaration = worksheetPromptText(naming[0].slice(0, naming[0].indexOf(name) + name.length));
+        rest = rest.replace(declaration, "").replace(/["«»]/g, " ").trim();
+    }
+    const numbered = /^\s*(\d+)\b/.exec(rest);
+    if (numbered) {
+        if (!name) name = "Feuille " + numbered[1];
+        rest = rest.slice(numbered[0].length).trim();
+    }
+    const years = rest.match(/\b(?:19|20|21)\d{2}\b/g) || [];
+    const empty = /\bvide\b/.test(rest);
+    const copy = /\b(?:copi\w*|dupliqu\w*|reprend\w*|reprodui\w*)\b/.test(rest);
+    const error = years.length > 1 ? "Précise une seule année pour cette nouvelle feuille."
+        : empty && (years.length || copy || /\b(?:avec|contenant)\b/.test(rest)) ? "Précise si tu veux une feuille vide ou une copie des données."
+        : !empty && !years.length && !copy ? "Précise : une feuille vide, une copie du tableau, ou les lignes d'une année."
+        : "";
+    return {name, rest, empty, year: years.length === 1 ? Number(years[0]) : null, error};
+}
+
+function worksheetRequestResidual(request, columnName = "") {
+    let rest = request.rest;
+    if (columnName) rest = rest.split(worksheetPromptText(columnName)).join(" ");
+    if (request.year != null) rest = rest.replace(String(request.year), " ");
+    const allowed = /\b(?:vide|avec|pour|contenant|en|copiant|copie|copier|duplique|dupliquer|reprends|reprendre|reproduis|reproduire|et|les|des|le|la|du|de|d|l|mes|nos|ces|ce|cette|adherents?|lignes?|donnees|enregistrements?|entrees|clients?|ventes?|commandes?|factures?|produits?|tableau|dont|est|egale|a|annee|uniquement|seulement|tout|toute|tous|toutes|entier|entiere|actuel|actuelle|actuels|actuelles|source|selectionne|selectionnee)\b/g;
+    return rest.replace(allowed, " ").replace(/[\s.,;:!?«»"()\-]/g, "");
+}
+
+function worksheetYearColumn(request, columns) {
+    const candidates = columns.map((column, index) => ({...column, index}))
+        .filter(column => column.type === "date" || /\b(?:date|annee)\b/.test(worksheetPromptText(column.name)));
+    const explicit = candidates.filter(column => request.rest.includes(worksheetPromptText(column.name)));
+    const adhesion = candidates.filter(column => /adhesion/.test(worksheetPromptText(column.name)));
+    const chosen = explicit.length === 1 ? explicit[0]
+        : !explicit.length && /\badherents?\b/.test(request.rest) && adhesion.length === 1 ? adhesion[0]
+        : !explicit.length && candidates.length === 1 ? candidates[0] : null;
+    if (!chosen) throw new Error(candidates.length
+        ? "Précise la colonne de date à utiliser : " + candidates.map(column => column.name).join(", ") + "."
+        : "Aucune colonne de date ou d'année n'a été trouvée dans ce tableau.");
+    return chosen;
+}
+
+function worksheetCellYear(value, column, epochOffset) {
+    if (value == null || value === "") return null;
+    if (/\bannee\b/.test(worksheetPromptText(column.name)) && /^\d{4}$/.test(String(value))) return Number(value);
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return new Date((value + epochOffset - 25569) * 86400000).getUTCFullYear();
+    }
+    const text = String(value).trim();
+    const match = /^(\d{4})[-/]/.exec(text) || /^\d{1,2}[-/.]\d{1,2}[-/.](\d{4})(?:\s|$)/.exec(text);
+    return match ? Number(match[1]) : null;
+}
+
+function uniqueWorksheetName(requested, names) {
+    const base = String(requested || "Nouvelle feuille").replace(/[\\/:?*\[\]]/g, " ")
+        .trim().slice(0, 31).replace(/^'+|'+$/g, "").trim() || "Nouvelle feuille";
+    const taken = new Set(names.map(name => name.toLowerCase()));
+    let candidate = base, suffix = 2;
+    while (taken.has(candidate.toLowerCase()) || candidate.toLowerCase() === "history") {
+        const tail = " (" + suffix++ + ")";
+        candidate = base.slice(0, 31 - tail.length) + tail;
+    }
+    return candidate;
+}
+
+async function executeWorksheetRequest(request) {
+    if (excelTableOperationBusy) return;
+    excelTableOperationBusy = true;
+    updateTableActionButton();
+    try {
+        if (request.error) throw new Error(request.error);
+        const info = await officeInitialization;
+        if (!info || typeof Excel === "undefined") throw new Error("Ouvre TableIA depuis Excel pour créer une feuille.");
+        if (!request.empty && !Office.context.requirements.isSetSupported("ExcelApi", "1.9")) throw new Error("Cette version d'Excel ne permet pas la copie du tableau vers une nouvelle feuille.");
+        const result = await Excel.run(async function (context) {
+            const sheets = context.workbook.worksheets;
+            sheets.load("items/name");
+            const source = sheets.getActiveWorksheet();
+            let table = null, range = null, headers = null, columns = [], indexes = [], offset = 0;
+            if (!request.empty) {
+                const tables = source.tables;
+                tables.load("items/id,items/name");
+                const cell = context.workbook.getActiveCell();
+                cell.load("rowIndex,columnIndex");
+                await context.sync();
+                const rectangles = tables.items.map(item => ({table: item, range: item.getRange()}));
+                rectangles.forEach(item => item.range.load("rowIndex,columnIndex,rowCount,columnCount"));
+                await context.sync();
+                const selected = rectangles.filter(item => excelRectangleContains({row:item.range.rowIndex, column:item.range.columnIndex, height:item.range.rowCount, width:item.range.columnCount}, cell.rowIndex, cell.columnIndex));
+                const candidate = selected[0] || (rectangles.length === 1 ? rectangles[0] : null);
+                if (!candidate) throw new Error("Clique dans le tableau source, puis relance la création de feuille.");
+                table = candidate.table;
+                range = candidate.range;
+                table.load("showHeaders,showTotals,style");
+                headers = table.getHeaderRowRange();
+                headers.load("values");
+                range.load("values,text,formulas,numberFormat");
+                const epoch = context.workbook.functions.date(2000, 1, 1);
+                epoch.load("value");
+                await context.sync();
+                columns = excelSnapshotFromRanges({columns:[],title:table.name}, table, headers.values, range).data.columns;
+                const filterColumn = request.year == null ? null : worksheetYearColumn(request, columns);
+                if (worksheetRequestResidual(request, filterColumn?.name)) throw new Error("Cette première version accepte une copie du tableau ou un filtre par année. Précise une seule condition de date.");
+                offset = table.showHeaders ? 1 : 0;
+                const end = range.values.length - (table.showTotals ? 1 : 0);
+                indexes = Array.from({length:Math.max(0, end - offset)}, (_, i) => i + offset)
+                    .filter(i => !filterColumn || worksheetCellYear(range.values[i][filterColumn.index], filterColumn, epoch.value === 35064 ? 1462 : 0) === request.year);
+                if (!indexes.length) throw new Error(request.year == null ? "Le tableau source ne contient aucune ligne à copier." : "Aucune ligne ne correspond à l'année " + request.year + ". Aucune feuille créée.");
+            } else {
+                if (worksheetRequestResidual(request)) throw new Error("Pour une feuille vide, indique seulement son nom, par exemple : Crée une feuille vide nommée Budget.");
+                await context.sync();
+            }
+            const name = uniqueWorksheetName(request.name || (request.empty ? "Nouvelle feuille" : request.year == null ? "Copie tableau" : "Extraction " + request.year), sheets.items.map(item => item.name));
+            const destination = sheets.add(name);
+            let reference = null;
+            if (!request.empty) {
+                const width = columns.length;
+                destination.getRangeByIndexes(0, 0, 1, width).copyFrom(headers, Excel.RangeCopyType.values);
+                indexes.forEach(function (sourceIndex, i) {
+                    const target = destination.getRangeByIndexes(i + 1, 0, 1, width);
+                    target.copyFrom(source.getRangeByIndexes(range.rowIndex + sourceIndex, range.columnIndex, 1, width), Excel.RangeCopyType.values);
+                    target.numberFormat = [range.numberFormat[sourceIndex]];
+                });
+                const targetRange = destination.getRangeByIndexes(0, 0, indexes.length + 1, width);
+                const newTable = destination.tables.add(targetRange, true);
+                newTable.style = table.style || "TableStyleMedium7";
+                newTable.showHeaders = true;
+                newTable.showTotals = false;
+                newTable.load("id,name");
+                targetRange.format.autofitColumns();
+                destination.activate();
+                await context.sync();
+                reference = {id:newTable.id, title:name, columns, summaryFormulas:[], summaryCells:[]};
+            } else {
+                destination.activate();
+                await context.sync();
+            }
+            return {name, reference, count:indexes.length};
+        });
+        if (result.reference) {
+            linkedExcelTable = result.reference;
+            excelSyncGeneration += 1;
+            excelPreviewIsDraft = false;
+            excelDraftBase = null;
+            lastExcelSnapshot = null;
+            previousTableData = null;
+            rememberExcelTable();
+            await refreshExcelPreview();
+        } else {
+            clearDetectedExcelTable(null, true);
+        }
+        textPrompt.value = "";
+        clearPromptButton.style.display = selectedPhoto ? "block" : "none";
+        statusText.textContent = "✅ Feuille « " + result.name + " » créée" + (result.reference ? " : " + result.count + " ligne(s) copiée(s)." : ".");
+    } catch (error) {
+        statusText.textContent = "❌ " + (error?.message || "Création de feuille impossible.");
+    } finally {
+        excelTableOperationBusy = false;
+        updateTableActionButton();
+        scheduleExcelDetection();
+    }
+}
+
+function updateTableActionButton() {
+    const sheetRequest = parseWorksheetRequest(textPrompt.value);
+
+    textAnalyzeButton.textContent = sheetRequest
+        ? "✨ CRÉER LA FEUILLE"
+        : currentTableData || excelTableSelectionRequired
+            ? "✨ MODIFIER LE TABLEAU"
+            : "✨ CRÉER LE TABLEAU";
+
+    textAnalyzeButton.disabled =
+        excelTableOperationBusy ||
+        (!sheetRequest && excelTableSelectionRequired);
+}
+
+function clearDetectedExcelTable(message, force = false) {
+    if (force || linkedExcelTable || excelTableSelectionRequired) {
         detachExcelTable();
         currentTableData = null;
         previousTableData = null;

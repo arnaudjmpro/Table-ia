@@ -102,8 +102,16 @@ textPrompt.addEventListener(
     }
 );
 
+
 let selectedPhoto = null;
 let worksheetInterpretationBusy = false;
+let tableConversation = null;
+let conversationLoading = null;
+let conversationSending = false;
+let conversationTurn = null;
+let resolvedConversationPrompt = null;
+let conversationSheetName = "";
+const CONVERSATION_SETTING = "tableia.conversation.v1";
 let currentTableData = null;
 let previousTableData = null;
 let cameraDialog = null;
@@ -569,9 +577,7 @@ if (SpeechRecognition || isEmbeddedInOffice) {
 // CREATION PAR TEXTE
 // ==========================================
 
-        textAnalyzeButton.addEventListener(
-    "click",
-    async function () {
+async function submitTableRequest() {
 
         if (excelTableOperationBusy || worksheetInterpretationBusy) return;
         if (await interpretWorksheetRequest()) return;
@@ -587,10 +593,10 @@ if (SpeechRecognition || isEmbeddedInOffice) {
             } finally {
                 updateTableActionButton();
             }
-        }
+               }
 
         const prompt =
-            textPrompt.value.trim();
+            resolvedConversationPrompt || textPrompt.value.trim();
 
 if (currentTableData) {
 
@@ -695,11 +701,12 @@ if (currentTableData) {
 
         textAnalyzeButton.disabled =
             false;
-        excelTableOperationBusy = false;
+                excelTableOperationBusy = false;
         updateTableActionButton();
         scheduleExcelDetection();
-    }
-);
+}
+
+textAnalyzeButton.addEventListener("click", sendConversationMessage);
 
 clearPromptButton.addEventListener(
     "click",
@@ -1147,10 +1154,10 @@ async function modifyCurrentTable() {
             statusText.textContent =
                 "Aucun tableau à modifier.";
             return;
-        }
+                }
 
         const instruction =
-    textPrompt.value.trim();
+    resolvedConversationPrompt || textPrompt.value.trim();
 
 if (!instruction) {
     statusText.textContent =
@@ -1922,6 +1929,102 @@ async function refreshExcelPreview() {
         }
     } finally {
         excelSyncBusy = false;
+        }
+}
+
+function updateConversationContext() {
+    if (!tableConversation) return;
+    const sheet = conversationSheetName ? "Feuille : " + conversationSheetName + " · " : "";
+    const table = linkedExcelTable?.title || currentTableData?.title;
+    tableConversation.setContext(sheet + (excelTableSelectionRequired ? "Cliquez dans le tableau à utiliser"
+        : table ? (linkedExcelTable ? "Tableau : " : "Aperçu non inséré : ") + table : "Aucun tableau actif"));
+}
+
+async function initializeTableConversation() {
+    if (tableConversation) return tableConversation;
+    if (conversationLoading) return conversationLoading;
+    if (!textPrompt.parentElement) return null;
+    conversationLoading = (async function () {
+        await officeInitialization;
+        if (!window.TableIAConversation) {
+            await new Promise(resolve => {
+                const script = document.createElement("script");
+                let settled = false;
+                const finish = () => {if (!settled) {settled = true; clearTimeout(timer); resolve();}};
+                const timer = setTimeout(finish, 8000);
+                script.src = new URL("conversation.js", window.location.href).href;
+                script.onload = finish; script.onerror = finish;
+                (document.head || document.body).appendChild(script);
+            });
+        }
+        if (!window.TableIAConversation) return null;
+        tableConversation = window.TableIAConversation.mount({
+            prompt: textPrompt,
+            onSend: sendConversationMessage,
+            load() {return excelDocumentSettings()?.get(CONVERSATION_SETTING);},
+            save(value) {
+                const settings = excelDocumentSettings();
+                if (!settings) return;
+                settings.set(CONVERSATION_SETTING, value);
+                return new Promise((resolve, reject) => settings.saveAsync(result => {
+                    if (result.status === "failed") reject(new Error("Historique non enregistré"));
+                    else resolve();
+                }));
+            },
+            onReset() {
+                if (conversationSending || excelTableOperationBusy) return;
+                resolvedConversationPrompt = null;
+                clearPromptButton.click();
+                statusText.textContent = "💬 Nouvelle conversation. Le tableau Excel actif reste disponible.";
+            }
+        });
+        await tableConversation.ready;
+        updateTableActionButton();
+        return tableConversation;
+    })().catch(error => {console.warn("Conversation indisponible", error); return null;});
+    return conversationLoading;
+}
+
+async function sendConversationMessage() {
+    if (conversationSending || worksheetInterpretationBusy || excelTableOperationBusy) return;
+    conversationSending = true;
+    updateTableActionButton();
+    let api = null;
+    let prompt = "", photo = null;
+    try {
+        api = await initializeTableConversation();
+        prompt = textPrompt.value.trim();
+        photo = selectedPhoto;
+        if (!prompt && !photo) {
+            statusText.textContent = "Écris, dicte ou ajoute une photo.";
+            return;
+        }
+        conversationTurn = {history:api?.history() || [], question:api?.lastQuestion() || null,
+            tableId:linkedExcelTable?.id || null, kind:null};
+        api?.setBusy(true);
+        api?.add("user", prompt + (photo ? (prompt ? "\n" : "") + "[Photo jointe]" : ""), "request", conversationTurn.tableId);
+        await submitTableRequest();
+    } catch (error) {
+        statusText.textContent = "❌ " + (error?.message || "Demande impossible. Réessaie.");
+    } finally {
+        if (conversationTurn) {
+            let message = statusText.textContent || "La demande n'a pas pu être exécutée.";
+            const kind = message.startsWith("❌") ? "error" : message.startsWith("✅") ? "done"
+                : conversationTurn.kind || "question";
+            if (message === "✅ Tableau généré avec succès.") {
+                message = "✅ Le tableau est prêt dans l’aperçu. Utilise le bouton d’insertion pour le placer dans Excel.";
+            }
+            api?.add("assistant", message, kind, conversationTurn.tableId);
+            if (api && kind !== "error" && textPrompt.value.trim() === prompt && selectedPhoto === photo) {
+                clearPromptButton.click();
+                statusText.textContent = message;
+            }
+        }
+        resolvedConversationPrompt = null;
+        conversationTurn = null;
+        conversationSending = false;
+        api?.setBusy(false);
+        updateTableActionButton();
     }
 }
 
@@ -1965,13 +2068,17 @@ async function interpretWorksheetRequest() {
             : null;
 
         const snapshot = sourceReference
-            ? await readLinkedExcelTable(sourceReference)
+                        ? await readLinkedExcelTable(sourceReference)
             : null;
+
+        const contextData = snapshot?.data || currentTableData;
+        const contextColumns = contextData?.columns || [];
 
         const fingerprint = snapshot ? JSON.stringify(snapshot) : null;
         const generation = excelSyncGeneration;
         const selection = excelDetectionRequest;
         const photo = selectedPhoto;
+        if (conversationTurn) conversationTurn.tableId = sourceReference?.id || null;
 
         statusText.textContent =
             "✨ Interprétation de ta demande par l'IA...";
@@ -1986,24 +2093,30 @@ async function interpretWorksheetRequest() {
                 Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
             },
 
-            body: JSON.stringify({
+                        body: JSON.stringify({
                 mode: "interpret",
                 prompt,
+                ...(tableConversation && conversationTurn ? {
+                    conversationVersion: 1,
+                    conversation: conversationTurn.history
+                } : {}),
 
                 excelContext: {
                     hasTable: Boolean(sourceReference),
+                    hasPreview: Boolean(currentTableData),
+                    canUndo: Boolean(previousTableData),
                     selectionRequired: excelTableSelectionRequired,
                     hasImage: Boolean(photo),
-                    title: snapshot?.data.title || "",
-                    rowCount: snapshot?.data.rows.length || 0,
+                    title: contextData?.title || "",
+                    rowCount: contextData?.rows.length || 0,
 
-                    columns: (snapshot?.data.columns || []).map(
+                    columns: contextColumns.map(
                         (column, i) => ({
                             name: column.name,
                             type: column.type,
 
                             examples: [...new Set(
-                                snapshot.displayRows.map(row =>
+                                (snapshot?.displayRows || []).map(row =>
                                     String(row[i] ?? "").slice(0, 160)
                                 )
                             )].filter(Boolean).slice(0, 20)
@@ -2018,10 +2131,18 @@ async function interpretWorksheetRequest() {
         if (!response.ok) {
             throw new Error(
                 plan.error || "Interprétation IA indisponible."
-            );
+                        );
         }
 
-        validateWorksheetPlan(plan, snapshot?.data.columns || []);
+        const conversational = Boolean(tableConversation && conversationTurn);
+        if (conversational && typeof plan.instruction !== "string") {
+            throw new Error("La fonction tableia-ai doit être mise à jour dans Supabase pour prendre en charge la conversation.");
+        }
+        if (plan.action === "reply" && conversational) {
+            validateWorksheetPlan({...plan, action:"clarify"}, contextColumns);
+        } else {
+            validateWorksheetPlan(plan, contextColumns);
+        }
 
         if (
             textPrompt.value.trim() !== prompt ||
@@ -2042,15 +2163,34 @@ async function interpretWorksheetRequest() {
         ) {
             throw new Error(
                 "Le tableau Excel a changé pendant l'analyse. Relance ta demande."
-            );
+                        );
+        }
+
+        if (plan.action === "reply" && conversational) {
+            conversationTurn.kind = "answer";
+            statusText.textContent = "💬 " + plan.message;
+            return true;
         }
 
         if (plan.action === "clarify") {
+            if (conversationTurn) conversationTurn.kind = "question";
             statusText.textContent = "❓ " + plan.message;
             return true;
         }
 
-        if (plan.action === "continue") return false;
+        if (conversational && conversationTurn.question?.tableId &&
+            conversationTurn.question.tableId !== (sourceReference?.id || null) &&
+            !(plan.action === "create_sheet" && plan.empty)) {
+            throw new Error("Le tableau actif a changé depuis ma question. Reformule ta demande pour le tableau actuel.");
+        }
+
+        if (plan.action === "continue") {
+            if (conversational) {
+                if (!plan.instruction.trim()) throw new Error("L'IA doit préciser l'action à effectuer. Reformule ta demande.");
+                resolvedConversationPrompt = plan.instruction.trim();
+            }
+            return false;
+        }
 
         if (photo) {
             throw new Error(
@@ -2546,10 +2686,10 @@ async function executeWorksheetRequest(request) {
 function updateTableActionButton() {
     const hasPrompt = Boolean(textPrompt.value.trim());
 
-    textAnalyzeButton.textContent = worksheetInterpretationBusy
+        textAnalyzeButton.textContent = worksheetInterpretationBusy
         ? "✨ ANALYSE EN COURS..."
         : hasPrompt
-            ? "✨ ANALYSER LA DEMANDE"
+            ? tableConversation ? "✨ ENVOYER" : "✨ ANALYSER LA DEMANDE"
             : currentTableData || excelTableSelectionRequired
                 ? "✨ MODIFIER LE TABLEAU"
                 : "✨ CRÉER LE TABLEAU";
@@ -2557,7 +2697,9 @@ function updateTableActionButton() {
     textAnalyzeButton.disabled =
         excelTableOperationBusy ||
         worksheetInterpretationBusy ||
+        conversationSending ||
         (!hasPrompt && excelTableSelectionRequired);
+    updateConversationContext();
 }
 
 function clearDetectedExcelTable(message, force = false) {
@@ -2596,9 +2738,10 @@ async function detectActiveExcelTable() {
     if (excelTableOperationBusy || excelWriteBusy) return false;
     const request = excelDetectionRequest;
     const generation = excelSyncGeneration;
-    const task = (async function () {
+        const task = (async function () {
         const candidates = await Excel.run(async function (context) {
             const sheet = context.workbook.worksheets.getActiveWorksheet();
+            sheet.load?.("name");
             const tables = sheet.tables;
             tables.load("items/id,items/name");
             const cell = Office.context.requirements.isSetSupported("ExcelApi", "1.7")
@@ -2606,6 +2749,7 @@ async function detectActiveExcelTable() {
                 : context.workbook.getSelectedRange();
             cell.load("rowIndex,columnIndex");
             await context.sync();
+            conversationSheetName = sheet.name || "";
             const rectangles = tables.items.map(function (table) {
                 const range = table.getRange();
                 range.load("rowIndex,columnIndex,rowCount,columnCount");
@@ -3261,6 +3405,9 @@ function displayAiTable(data, previewRows) {
     resultSection.style.display =
         "block";
 
-    insertExcelButton.disabled =
+        insertExcelButton.disabled =
         false;
         }
+
+// Le fil est chargé séparément ; les commandes existantes restent utilisables si son chargement échoue.
+initializeTableConversation();

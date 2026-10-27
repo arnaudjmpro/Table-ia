@@ -202,7 +202,65 @@ function validWorksheetPlan(plan: any, context: any): boolean {
 
   return plan.filters.every((filter: any) => filter && names.includes(filter.column) &&
     typeof filter.value === "string" &&
-    ["eq", "neq", "contains", "gt", "gte", "lt", "lte", "year_eq", "is_empty", "is_not_empty"].includes(filter.operator));
+        ["eq", "neq", "contains", "gt", "gte", "lt", "lte", "year_eq", "is_empty", "is_not_empty"].includes(filter.operator));
+}
+
+const conversationPlanSchema = {
+  ...worksheetPlanSchema,
+  required: [...worksheetPlanSchema.required, "instruction"],
+  properties: {
+    ...worksheetPlanSchema.properties,
+    action: {type:"string", enum:["continue", "create_sheet", "clarify", "reply"]},
+    instruction: {type:"string"},
+  },
+};
+
+const conversationInstructions = worksheetPlanInstructions + `
+
+MODE CONVERSATION
+Les messages précédents permettent de comprendre les références et les réponses
+courtes. Les actions indiquées comme effectuées dans l'historique ont déjà été
+exécutées : ne les exécute pas de nouveau. Traite uniquement la nouvelle demande.
+Les données Excel du dernier message sont la référence actuelle, même si le
+classeur a été modifié manuellement depuis les messages précédents.
+hasPreview=true avec hasTable=false signifie qu'un tableau est prêt dans le
+volet mais pas encore inséré : on peut le modifier avec continue. Pour en copier
+les lignes vers une nouvelle feuille, demande d'abord son insertion dans Excel.
+
+- Pour continue, instruction contient une demande autonome et précise qui
+  intègre les précisions utiles de l'historique et du dernier message.
+  Exemple : après une demande d'ajout d'une colonne et une question sur son nom,
+  la réponse « Date d'adhésion » devient l'instruction complète d'ajout de cette
+  colonne. N'inclus pas de nouvelle modification non demandée.
+- Pour create_sheet, résous directement les réponses de clarification dans name,
+  empty et filters. Exemple : « Oui, appelle-la Relances » peut compléter une
+  extraction demandée au tour précédent. instruction="".
+- Pour clarify, pose une seule question utile ; instruction="".
+- reply est une réponse explicative sans action Excel : aide à l'utilisation,
+  capacités, explication d'une action déjà confirmée, ou information directement
+  fournie dans le contexte actuel. message contient une réponse courte en français.
+  Utilise du texte simple dans message, sans balisage Markdown.
+  name="", empty=false, match=all, filters=[], instruction="".
+- Ne prétends jamais avoir créé/modifié une feuille ou un tableau dans une reply.
+  Le client confirme les opérations après leur exécution réelle.
+- Pour une demande d'annulation, indique le bouton Annuler existant si canUndo
+  est vrai ; sinon explique que cette annulation n'est pas disponible. Ne tente
+  pas de reconstruire une ancienne version des données depuis les messages.
+- Les exemples par colonne sont échantillonnés et ne sont pas alignés par ligne.
+  N'invente aucun total, compte filtré ou résultat à partir de ces exemples.
+  Seul rowCount est le nombre exact de lignes du tableau actuel. Si le calcul
+  demandé exige des données absentes, indique cette limite et demande une précision.
+- Respecte la différence entre une réponse à ta question et une nouvelle demande.
+  Si le contexte actif ne permet plus de réaliser la demande précédente, clarify.
+- Une demande de création initiale d'un tableau sur une feuille sans tableau est
+  continue, avec sa demande complète dans instruction. Aucun tableau source n'est
+  nécessaire pour cette génération initiale, y compris des données fictives demandées.
+`;
+
+function validConversationPlan(plan: any, context: any): boolean {
+  if (typeof plan?.instruction !== "string") return false;
+  if (plan.action === "continue" ? !plan.instruction.trim() : plan.instruction !== "") return false;
+  return validWorksheetPlan({...plan, action:plan.action === "reply" ? "clarify" : plan.action}, context);
 }
 
 const editSchema = {
@@ -290,6 +348,17 @@ Deno.serve(async (req) => {
 
     const excelContext =
       body?.excelContext ?? null;
+
+    const conversational = mode === "interpret" && body?.conversationVersion === 1;
+    const history: {role:"user" | "assistant"; content:string}[] = [];
+    if (conversational) {
+      if (!Array.isArray(body.conversation) || body.conversation.length > 12 ||
+          body.conversation.some((item: any) => !item || !["user", "assistant"].includes(item.role) ||
+            typeof item.content !== "string" || item.content.length > 3000)) {
+        return jsonResponse({error:"L'historique de conversation est invalide."}, 400);
+      }
+      for (const item of body.conversation) history.push({role:item.role, content:item.content});
+    }
     
 const imageBase64 =
   String(body?.imageBase64 ?? "").trim();
@@ -609,13 +678,14 @@ if (prompt) {
 input: [
     {
         role: "developer",
-            content: [
+                        content: [
                   {
                           type: "input_text",
-text: mode === "interpret" ? worksheetPlanInstructions : mode === "edit" ? editInstructions : instructions,
+text: conversational ? conversationInstructions : mode === "interpret" ? worksheetPlanInstructions : mode === "edit" ? editInstructions : instructions,
                                         },
                                             ],
                                               },
+                                                ...history,
                                                 {
                                                     role: "user",
                                                         content: userContent,
@@ -625,12 +695,12 @@ text: mode === "interpret" ? worksheetPlanInstructions : mode === "edit" ? editI
             text: {
               format: {
                 type: "json_schema",
-                name: mode === "interpret" ? "tableia_worksheet_plan" : mode === "edit" ? "tableia_edit" : "tableia_tool",
+                name: conversational ? "tableia_conversation_plan" : mode === "interpret" ? "tableia_worksheet_plan" : mode === "edit" ? "tableia_edit" : "tableia_tool",
                 description: mode === "interpret" ? "Interprétation de la demande et plan de création d'une feuille Excel" : mode === "edit"
                   ? "Instructions de modification directe Excel"
                   : "Structure d'un outil Excel généré par TableIA",
                 strict: true,
-                schema: mode === "interpret" ? worksheetPlanSchema : mode === "edit" ? editSchema : tableSchema,
+                schema: conversational ? conversationPlanSchema : mode === "interpret" ? worksheetPlanSchema : mode === "edit" ? editSchema : tableSchema,
               },
             },
           }),
@@ -754,10 +824,10 @@ text: mode === "interpret" ? worksheetPlanInstructions : mode === "edit" ? editI
           502,
         );
       }
-    }
+        }
 
     if (mode === "interpret") {
-      if (openAiData.status !== "completed" || !validWorksheetPlan(result, excelContext)) {
+      if (openAiData.status !== "completed" || !(conversational ? validConversationPlan(result, excelContext) : validWorksheetPlan(result, excelContext))) {
         return jsonResponse({error: "L'interprétation IA est incomplète ou invalide. Reformule la demande."}, 502);
       }
       return jsonResponse(result);

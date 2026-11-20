@@ -49,6 +49,27 @@ const insertExcelButton =
 const isEmbeddedInOffice =
     window.self !== window.top;
 
+// La Preview Replit utilise elle aussi une iframe : seule la présence réelle
+// de l'hôte Excel doit désactiver la conversation destinée au navigateur.
+const isExcelHost = isEmbeddedInOffice &&
+    typeof Office !== "undefined" &&
+    Office.context && Office.context.host === "Excel";
+const isWebConversation = !isExcelHost;
+const conversationPanel = document.getElementById("conversationPanel");
+const conversationMessagesElement = document.getElementById("conversationMessages");
+const conversationHint = document.getElementById("conversationHint");
+const newConversationButton = document.getElementById("newConversationButton");
+const sendHint = document.getElementById("sendHint");
+const CONVERSATION_STORAGE_KEY = "tableia.webConversation.v1";
+
+let conversationMessages = [];
+
+if (isWebConversation) {
+    document.body.classList.add("web-conversation");
+    conversationPanel.hidden = false;
+    sendHint.hidden = false;
+}
+
 const isMobileCaptureDevice =
     /Android|iPhone|iPad|iPod/i.test(
         navigator.userAgent
@@ -104,6 +125,73 @@ let selectedPhoto = null;
 let currentTableData = null;
 let previousTableData = null;
 let cameraDialog = null;
+
+function saveConversation() {
+    if (!isWebConversation) return;
+    try {
+        sessionStorage.setItem(CONVERSATION_STORAGE_KEY, JSON.stringify({
+            messages: conversationMessages.slice(-40),
+            table: currentTableData,
+            previousTable: previousTableData
+        }));
+    } catch (error) {
+        console.warn("Conversation non sauvegardée dans cet onglet.", error);
+    }
+}
+
+function appendConversationMessage(role, text, persist = true) {
+    if (!isWebConversation) return;
+    const message = { role, text: String(text || "") };
+    conversationMessages.push(message);
+    const bubble = document.createElement("div");
+    bubble.className = "conversation-message " + role;
+    bubble.textContent = message.text;
+    conversationMessagesElement.appendChild(bubble);
+    conversationHint.hidden = true;
+    conversationMessagesElement.scrollTop = conversationMessagesElement.scrollHeight;
+    if (persist) saveConversation();
+}
+
+function clearComposer() {
+    textPrompt.value = "";
+    selectedPhoto = null;
+    cameraInput.value = "";
+    galleryInput.value = "";
+    photoPreview.removeAttribute("src");
+    photoPreview.style.display = "none";
+    clearPromptButton.style.display = "none";
+}
+
+function conversationContext() {
+    return conversationMessages.slice(-12).map(function (message) {
+        return (message.role === "user" ? "Utilisateur : " : "TableIA : ") + message.text;
+    }).join("\n");
+}
+
+if (isWebConversation) {
+    newConversationButton.addEventListener("click", function () {
+        conversationMessages = [];
+        conversationMessagesElement.replaceChildren();
+        conversationHint.hidden = false;
+        currentTableData = null;
+        previousTableData = null;
+        tableContainer.replaceChildren();
+        resultSection.style.display = "none";
+        insertExcelButton.disabled = true;
+        textAnalyzeButton.textContent = "✨ CRÉER LE TABLEAU";
+        statusText.textContent = "";
+        clearComposer();
+        saveConversation();
+        textPrompt.focus();
+    });
+
+    textPrompt.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+            event.preventDefault();
+            if (!textAnalyzeButton.disabled) textAnalyzeButton.click();
+        }
+    });
+}
 
 // ==========================================
 // DICTÉE VOCALE
@@ -642,12 +730,19 @@ if (currentTableData) {
                 data
             );
 
+            appendConversationMessage("user", prompt || "Analyse cette photo et crée un tableau.");
+            appendConversationMessage("assistant", "Le tableau « " +
+                (data.title || "TableIA") + " » est prêt. Vous pouvez me demander de le modifier.");
+            if (isWebConversation) clearComposer();
+
             statusText.textContent =
                 "✅ Tableau généré avec succès.";
 
         } catch (error) {
 
             console.error(error);
+
+            appendConversationMessage("assistant", "Je n'ai pas pu créer le tableau. Vérifiez votre demande et réessayez.");
 
             statusText.textContent =
                 "❌ Impossible de générer le tableau.";
@@ -979,6 +1074,8 @@ currentTableData = null;
     "✨ CRÉER LE TABLEAU";
 previousTableData =
     null;
+        appendConversationMessage("assistant", "Le tableau a été supprimé. Décrivez le nouveau tableau à créer.");
+        saveConversation();
         
         resultSection.style.display =
             "none";
@@ -1012,11 +1109,6 @@ async function modifyCurrentTable() {
             return;
         }
 
-previousTableData =
-    JSON.parse(
-        JSON.stringify(currentTableData)
-    );
-        
         const instruction =
     textPrompt.value.trim();
 
@@ -1033,6 +1125,23 @@ if (!instruction) {
             "✨ Modification du tableau par l'IA...";
 
         try {
+
+            const previousSnapshot = JSON.parse(JSON.stringify(currentTableData));
+            const body = {
+                prompt:
+                    "Modifie ce tableau existant selon la demande de l'utilisateur. " +
+                    "Conserve toutes les données qui ne sont pas concernées. " +
+                    "Retourne le tableau complet au format TableIA.\n\n" +
+                    (isWebConversation && conversationMessages.length
+                        ? "CONVERSATION PRÉCÉDENTE :\n" + conversationContext() + "\n\n"
+                        : "") +
+                    "TABLEAU ACTUEL :\n" + JSON.stringify(currentTableData) +
+                    "\n\nMODIFICATION DEMANDÉE :\n" + instruction
+            };
+            if (selectedPhoto) {
+                body.imageBase64 = await prepareImage(selectedPhoto);
+                body.imageMimeType = "image/jpeg";
+            }
 
             const response =
                 await fetch(
@@ -1051,16 +1160,7 @@ if (!instruction) {
                                 `Bearer ${SUPABASE_PUBLISHABLE_KEY}`
                         },
 
-                        body: JSON.stringify({
-                            prompt:
-                                "Modifie ce tableau existant selon la demande de l'utilisateur. " +
-                                "Conserve toutes les données qui ne sont pas concernées. " +
-                                "Retourne le tableau complet au format TableIA.\n\n" +
-                                "TABLEAU ACTUEL :\n" +
-                                JSON.stringify(currentTableData) +
-                                "\n\nMODIFICATION DEMANDÉE :\n" +
-                                instruction
-                        })
+                        body: JSON.stringify(body)
                     }
                 );
 
@@ -1076,7 +1176,11 @@ if (!instruction) {
             const data =
                 JSON.parse(responseText);
 
+            previousTableData = previousSnapshot;
             displayAiTable(data);
+            appendConversationMessage("user", instruction + (selectedPhoto ? " [photo jointe]" : ""));
+            appendConversationMessage("assistant", "Le tableau a été mis à jour. Vous pouvez poursuivre la discussion.");
+            if (isWebConversation) clearComposer();
 
             statusText.textContent =
                 "✅ Tableau modifié avec succès.";
@@ -1084,6 +1188,8 @@ if (!instruction) {
         } catch (error) {
 
             console.error(error);
+
+            appendConversationMessage("assistant", "Je n'ai pas pu modifier le tableau. Réessayez sans perdre le tableau actuel.");
 
             statusText.textContent =
                 "❌ Impossible de modifier le tableau.";
@@ -1115,6 +1221,9 @@ undoTableButton.addEventListener(
 
         previousTableData =
             null;
+
+        appendConversationMessage("assistant", "La dernière modification du tableau a été annulée.");
+        saveConversation();
 
         statusText.textContent =
             "↩ Dernière modification annulée.";
@@ -1783,3 +1892,25 @@ function displayAiTable(data) {
     insertExcelButton.disabled =
         false;
         }
+
+if (isWebConversation) {
+    try {
+        const saved = JSON.parse(sessionStorage.getItem(CONVERSATION_STORAGE_KEY) || "null");
+        if (saved && Array.isArray(saved.messages)) {
+            saved.messages.slice(-40).forEach(function (message) {
+                if (message && (message.role === "user" || message.role === "assistant") &&
+                    typeof message.text === "string") {
+                    appendConversationMessage(message.role, message.text, false);
+                }
+            });
+        }
+        if (saved && saved.table && Array.isArray(saved.table.columns)) {
+            displayAiTable(saved.table);
+            if (saved.previousTable && Array.isArray(saved.previousTable.columns)) {
+                previousTableData = saved.previousTable;
+            }
+        }
+    } catch (error) {
+        console.warn("La conversation précédente n'a pas pu être restaurée.", error);
+    }
+}

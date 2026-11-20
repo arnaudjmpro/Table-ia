@@ -35,11 +35,23 @@
         ✨ Créer ou modifier un tableau
     </h2>
 
+    <section id="conversationPanel" class="conversation-panel" aria-label="Votre conversation" hidden>
+        <div class="conversation-heading">
+            <h3>Votre conversation</h3>
+            <button id="newConversationButton" type="button">Nouvelle conversation</button>
+        </div>
+        <div id="conversationMessages" class="conversation-messages" role="log" aria-live="polite"></div>
+        <p id="conversationHint" class="conversation-hint">Créez un tableau, puis demandez des modifications dans cette conversation.</p>
+    </section>
+
     <textarea
         id="textPrompt"
         rows="5"
         placeholder="Écrivez ou dictez votre demande..."
+        aria-label="Votre demande pour TableIA"
     ></textarea>
+
+    <p id="sendHint" class="send-hint" hidden>Entrée pour envoyer · Maj + Entrée pour une nouvelle ligne</p>
 
 
     <label

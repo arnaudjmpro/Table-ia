@@ -130,6 +130,16 @@ th {
     font-weight: bold;
   }
 
+table tr:nth-child(even):not(.summary-row) td {
+    background: #f8faf9;
+}
+
+table .summary-row td {
+    background: #e2f0d9;
+    font-weight: bold;
+    border-top: 2px solid #107c41;
+}
+
 #textPrompt {
     width: 100%;
     min-height: 130px;

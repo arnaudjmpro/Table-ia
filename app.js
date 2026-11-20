@@ -4,6 +4,15 @@ const SUPABASE_FUNCTION_URL =
 const SUPABASE_PUBLISHABLE_KEY =
     "sb_publishable_LU68bB5ip1OEPr8DJnjJJg_G36GmXoY";
 
+const PHOTO_TABLE_INSTRUCTION =
+    "Lis la photo et crée un tableau TableIA fidèle aux données visibles. " +
+    "Identifie les en-têtes utiles : par exemple Nom et Montant si la photo contient des noms et des sommes. " +
+    "Mets une personne ou une entrée par ligne, avec chaque valeur dans sa colonne. " +
+    "Pour les sommes, utilise le type currency et conserve les montants lisibles. " +
+    "Si quantité et prix unitaire sont présents, ajoute une colonne Total calculée ; sinon ne crée pas de colonne Total redondante. " +
+    "Ne devine pas les valeurs illisibles : laisse ces cellules vides. " +
+    "Place les totaux dans summaryFormulas, hors des lignes de données, pour qu'Excel puisse recalculer la somme. ";
+
 const textPrompt =
     document.getElementById("textPrompt");
 
@@ -676,10 +685,7 @@ if (currentTableData) {
 
             const body = {};
 
-            if (prompt) {
-                body.prompt =
-                    prompt;
-            }
+            if (prompt) body.prompt = prompt;
 
             if (selectedPhoto) {
 
@@ -694,10 +700,8 @@ if (currentTableData) {
                 body.imageMimeType =
                     "image/jpeg";
 
-                if (!prompt) {
-                    body.prompt =
-                        "Analyse ce document et transforme les informations visibles en tableau TableIA structuré.";
-                }
+                body.prompt = PHOTO_TABLE_INSTRUCTION +
+                    (prompt ? "\n\nDemande de l'utilisateur : " + prompt : "");
             }
 
             const response =
@@ -731,10 +735,9 @@ if (currentTableData) {
                 );
             }
 
-            const data =
-                JSON.parse(
-                    responseText
-                );
+            const data = selectedPhoto
+                ? structurePhotoTable(JSON.parse(responseText))
+                : JSON.parse(responseText);
 
             displayAiTable(
                 data
@@ -1197,8 +1200,9 @@ async function modifyCurrentTable() {
             return;
         }
 
-        const instruction =
-    textPrompt.value.trim();
+        const instruction = textPrompt.value.trim() ||
+            (selectedPhoto ? "Ajoute au tableau actuel les informations visibles sur cette photo, " +
+                "en les plaçant dans les colonnes adaptées. Conserve les lignes existantes." : "");
 
 if (!instruction) {
     statusText.textContent =
@@ -1217,6 +1221,7 @@ if (!instruction) {
             const previousSnapshot = JSON.parse(JSON.stringify(currentTableData));
             const body = {
                 prompt:
+                    (selectedPhoto ? PHOTO_TABLE_INSTRUCTION + "\n\n" : "") +
                     "Modifie ce tableau existant selon la demande de l'utilisateur. " +
                     "Conserve toutes les données qui ne sont pas concernées. " +
                     "Retourne le tableau complet au format TableIA.\n\n" +
@@ -1261,8 +1266,9 @@ if (!instruction) {
                 );
             }
 
-            const data =
-                JSON.parse(responseText);
+            const data = selectedPhoto
+                ? structurePhotoTable(JSON.parse(responseText))
+                : JSON.parse(responseText);
 
             previousTableData = previousSnapshot;
             displayAiTable(data);
@@ -1387,16 +1393,25 @@ function coerceExcelValue(value, type) {
         type === "currency" ||
         type === "percentage"
     ) {
-        const normalizedNumber =
-            text
-                .replace(/\s/g, "")
-                .replace(/[€$£%]/g, "")
-                .replace(",", ".");
+        let normalizedNumber = text
+            .replace(/\s/g, "")
+            .replace(/[€$£%]/g, "");
+
+        // Les photos de documents français contiennent souvent 1.234,56 €.
+        if (normalizedNumber.includes(",") && normalizedNumber.includes(".")) {
+            normalizedNumber = normalizedNumber.lastIndexOf(",") > normalizedNumber.lastIndexOf(".")
+                ? normalizedNumber.replace(/\./g, "").replace(",", ".")
+                : normalizedNumber.replace(/,/g, "");
+        } else if (normalizedNumber.includes(",")) {
+            normalizedNumber = normalizedNumber.replace(",", ".");
+        } else if (type === "currency" && /^-?\d{1,3}(?:\.\d{3})+$/.test(normalizedNumber)) {
+            normalizedNumber = normalizedNumber.replace(/\./g, "");
+        }
 
         const numericValue =
             Number(normalizedNumber);
 
-        if (!Number.isNaN(numericValue)) {
+        if (normalizedNumber && Number.isFinite(numericValue)) {
             if (
                 type === "percentage" &&
                 text.includes("%")
@@ -1467,6 +1482,62 @@ function coerceExcelValue(value, type) {
     }
 
     return text;
+}
+
+function excelColumnLetter(index) {
+    let result = "";
+    for (let n = index + 1; n > 0; n = Math.floor((n - 1) / 26)) {
+        result = String.fromCharCode(65 + (n - 1) % 26) + result;
+    }
+    return result;
+}
+
+function structurePhotoTable(data) {
+    if (!data || !Array.isArray(data.columns) || !Array.isArray(data.rows)) return data;
+
+    const columns = data.columns.map(column => ({ ...column }));
+    const rows = data.rows.map(row => Array.isArray(row) ? row.slice() : row);
+    const monetaryHeader = /montant|prix|co[uû]t|somme|solde/i;
+    const hasMonetaryHeader = columns.some(column => monetaryHeader.test(column.name || ""));
+
+    const amountColumns = columns.flatMap((column, index) => {
+        const header = String(column.name || "");
+        if (!monetaryHeader.test(header) && !(hasMonetaryHeader && /\btotal\b/i.test(header))) return [];
+        const hasAmount = rows.some(row => Array.isArray(row) &&
+            typeof coerceExcelValue(row[index], "currency") === "number");
+        if (!hasAmount) return [];
+        if (!column.type || column.type === "text" || column.type === "number") column.type = "currency";
+        return [index];
+    });
+
+    const totalIndex = amountColumns.slice().reverse().find(index => /\btotal\b/i.test(columns[index].name || "")) ??
+        amountColumns[amountColumns.length - 1];
+    if (totalIndex === undefined) return { ...data, columns, rows };
+
+    const lastRow = rows[rows.length - 1];
+    if (rows.length > 1 && Array.isArray(lastRow) &&
+        /^total(?:\s+g[ée]n[ée]ral)?$/i.test(String(lastRow[0] || "").trim()) &&
+        typeof coerceExcelValue(lastRow[totalIndex], "currency") === "number") {
+        rows.pop(); // Le total imprimé n'est pas une ligne de données à recompter.
+    }
+
+    const summaries = Array.isArray(data.summaryFormulas) ? data.summaryFormulas.slice() : [];
+    if (rows.length) {
+        const letter = excelColumnLetter(totalIndex);
+        const formula = `=SUM(${letter}2:${letter}{lastRow})`;
+        const existingTotalIndex = summaries.findIndex(summary =>
+            summary.targetColumn === columns[totalIndex].name && /^=?\s*SUM\(/i.test(summary.formula || ""));
+        if (existingTotalIndex >= 0) {
+            summaries[existingTotalIndex] = { ...summaries[existingTotalIndex], formula };
+        } else {
+            summaries.push({
+                label: "Total",
+                targetColumn: columns[totalIndex].name,
+                formula
+            });
+        }
+    }
+    return { ...data, columns, rows, summaryFormulas: summaries };
 }
 
 function excelNumberFormatForType(type) {
@@ -1741,13 +1812,13 @@ insertExcelButton.addEventListener(
 
                             const summaryRowIndex =
                                 dataRowCount +
-                                2 +
+                                1 +
                                 summaryIndex;
 
                             const labelCell =
                                 sheet.getCell(
                                     summaryRowIndex,
-                                    0
+                                    targetColumnIndex === 0 ? 1 : 0
                                 );
 
                             const valueCell =
@@ -2002,6 +2073,35 @@ function displayAiTable(data) {
             table.appendChild(tr);
         }
     );
+
+    const summaries = Array.isArray(data.summaryFormulas) ? data.summaryFormulas : [];
+    summaries.forEach(function (summary) {
+        const index = data.columns.findIndex(column => column.name === summary.targetColumn);
+        if (index < 0 || !rows.length) return;
+        const letter = excelColumnLetter(index);
+        const formula = String(summary.formula || "").replace(/\s/g, "").toUpperCase();
+        const lastRow = rows.length + 1;
+        if (formula !== `=SUM(${letter}2:${letter}{LASTROW})` &&
+            formula !== `=SUM(${letter}2:${letter}${lastRow})`) return;
+
+        const values = rows.map(row => coerceExcelValue(Array.isArray(row) ? row[index] : "", data.columns[index].type));
+        if (!values.some(value => typeof value === "number")) return;
+        const total = values.reduce((sum, value) => sum + (typeof value === "number" ? value : 0), 0);
+        const tr = document.createElement("tr");
+        tr.className = "summary-row";
+        data.columns.forEach(function (column, columnIndex) {
+            const cell = document.createElement("td");
+            if (columnIndex === index) {
+                cell.textContent = new Intl.NumberFormat("fr-FR", column.type === "currency"
+                    ? { style: "currency", currency: "EUR" }
+                    : { maximumFractionDigits: 2 }).format(total);
+            } else if (columnIndex === (index === 0 ? 1 : 0)) {
+                cell.textContent = summary.label || "Total";
+            }
+            tr.appendChild(cell);
+        });
+        table.appendChild(tr);
+    });
 
 
     tableContainer.innerHTML =

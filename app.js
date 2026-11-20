@@ -126,6 +126,16 @@ let selectedPhoto = null;
 let currentTableData = null;
 let previousTableData = null;
 let cameraDialog = null;
+let photoPreviewUrl = null;
+
+function releasePhotoPreview() {
+    if (photoPreviewUrl) {
+        URL.revokeObjectURL(photoPreviewUrl);
+        photoPreviewUrl = null;
+    }
+    photoPreview.removeAttribute("src");
+    photoPreview.style.display = "none";
+}
 
 function saveConversation() {
     if (!isWebConversation) return;
@@ -158,8 +168,7 @@ function clearComposer() {
     selectedPhoto = null;
     cameraInput.value = "";
     galleryInput.value = "";
-    photoPreview.removeAttribute("src");
-    photoPreview.style.display = "none";
+    releasePhotoPreview();
     clearPromptButton.style.display = "none";
 }
 
@@ -770,11 +779,7 @@ cameraInput.value =
 galleryInput.value =
     "";
 
-photoPreview.src =
-    "";
-
-photoPreview.style.display =
-    "none";
+releasePhotoPreview();
         
 clearPromptButton.style.display =
     "none";
@@ -993,11 +998,11 @@ function handleSelectedPhoto(file) {
     selectedPhoto =
         file;
 
-    const imageUrl =
-        URL.createObjectURL(file);
+    releasePhotoPreview();
+    photoPreviewUrl = URL.createObjectURL(file);
 
     photoPreview.src =
-        imageUrl;
+        photoPreviewUrl;
 
     photoPreview.style.display =
         "block";
@@ -1009,16 +1014,94 @@ clearPromptButton.style.display =
         "📷 Photo prise en compte. Prête pour l'analyse.";
 }
 
+const webCameraDialog = document.getElementById("webCameraDialog");
+const webCameraVideo = document.getElementById("webCameraVideo");
+const webCameraStatus = document.getElementById("webCameraStatus");
+const capturePhotoButton = document.getElementById("capturePhotoButton");
+const cancelPhotoButton = document.getElementById("cancelPhotoButton");
+let webCameraStream = null;
+
+function stopWebCamera() {
+    if (webCameraStream) {
+        webCameraStream.getTracks().forEach(track => track.stop());
+        webCameraStream = null;
+    }
+    webCameraVideo.srcObject = null;
+    capturePhotoButton.disabled = true;
+}
+
+async function openWebCamera() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("Caméra indisponible dans ce navigateur. Vérifiez que la page est ouverte en HTTPS.");
+    }
+    webCameraStatus.textContent = "Autorisez l'accès à la caméra dans Safari…";
+    capturePhotoButton.disabled = true;
+    webCameraDialog.showModal();
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: true
+        });
+        if (!webCameraDialog.open) {
+            stream.getTracks().forEach(track => track.stop());
+            return;
+        }
+        webCameraStream = stream;
+        webCameraVideo.srcObject = stream;
+        await webCameraVideo.play();
+        if (!webCameraDialog.open || webCameraStream !== stream) return;
+        webCameraStatus.textContent = "Cadrez le document puis prenez la photo.";
+        capturePhotoButton.disabled = false;
+    } catch (error) {
+        const stillOpen = webCameraDialog.open;
+        stopWebCamera();
+        if (stillOpen) webCameraDialog.close();
+        if (!stillOpen) return;
+        if (error?.name === "NotAllowedError" || error?.name === "PermissionDeniedError") {
+            throw new Error("Accès à la caméra refusé. Autorisez la caméra pour ce site dans Safari.");
+        }
+        if (error?.name === "NotFoundError" || error?.name === "DevicesNotFoundError") {
+            throw new Error("Aucune caméra n'a été détectée sur cet appareil.");
+        }
+        throw new Error("La caméra n'a pas pu démarrer : " + (error?.message || "erreur inconnue"));
+    }
+}
+
+capturePhotoButton.addEventListener("click", function () {
+    if (!webCameraStream || !webCameraVideo.videoWidth || !webCameraVideo.videoHeight) {
+        webCameraStatus.textContent = "Attendez que l'image de la caméra apparaisse.";
+        return;
+    }
+    try {
+        const canvas = document.createElement("canvas");
+        const ratio = Math.min(1, 1600 / Math.max(webCameraVideo.videoWidth, webCameraVideo.videoHeight));
+        canvas.width = Math.round(webCameraVideo.videoWidth * ratio);
+        canvas.height = Math.round(webCameraVideo.videoHeight * ratio);
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Capture d'image indisponible.");
+        context.drawImage(webCameraVideo, 0, 0, canvas.width, canvas.height);
+        handleSelectedPhoto(dataUrlToPhotoFile(canvas.toDataURL("image/jpeg", 0.88)));
+        webCameraDialog.close();
+    } catch (error) {
+        console.error(error);
+        webCameraStatus.textContent = "Impossible de prendre la photo : " +
+            (error?.message || "erreur inconnue");
+    }
+});
+
+cancelPhotoButton.addEventListener("click", function () {
+    webCameraDialog.close();
+});
+webCameraDialog.addEventListener("close", stopWebCamera);
+window.addEventListener("pagehide", stopWebCamera);
+
 
 cameraButton.addEventListener(
     "click",
     function (event) {
         // Sur téléphone et tablette, le champ capture natif reste
         // la solution la plus directe et déjà validée.
-        if (
-            isMobileCaptureDevice ||
-            !isEmbeddedInOffice
-        ) {
+        if (isMobileCaptureDevice) {
             return;
         }
 
@@ -1026,18 +1109,22 @@ cameraButton.addEventListener(
         // sélecteur de fichiers. Une vraie fenêtre webcam est donc utilisée.
         event.preventDefault();
 
-        try {
-            openOfficeCameraDialog();
-        } catch (error) {
-            console.error(error);
-
-            statusText.textContent =
-                "❌ Photo : " +
-                (
-                    error?.message ||
-                    "ouverture impossible"
-                );
+        if (isExcelHost) {
+            try {
+                openOfficeCameraDialog();
+            } catch (error) {
+                console.error(error);
+                statusText.textContent = "❌ Photo : " +
+                    (error?.message || "ouverture impossible");
+            }
+            return;
         }
+        openWebCamera().catch(function (error) {
+            console.error(error);
+            statusText.textContent = "❌ Photo : " +
+                (error?.message || "ouverture impossible") +
+                " Vous pouvez aussi choisir une image dans la galerie.";
+        });
     }
 );
 

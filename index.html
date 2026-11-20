@@ -12,7 +12,7 @@
 
     <link
         rel="stylesheet"
-        href="style.css?v=20261120-1"
+        href="style.css?v=20261120-3"
     >
 </head>
 
@@ -161,8 +161,18 @@
 
     </main>
 
+<dialog id="webCameraDialog" class="camera-dialog" aria-labelledby="webCameraTitle">
+    <h2 id="webCameraTitle">Prendre une photo</h2>
+    <p id="webCameraStatus" role="status">Activation de la caméra…</p>
+    <video id="webCameraVideo" autoplay playsinline muted></video>
+    <div class="camera-actions">
+        <button id="capturePhotoButton" type="button" disabled>📷 Prendre la photo</button>
+        <button id="cancelPhotoButton" type="button">Annuler</button>
+    </div>
+</dialog>
+
 <script src="https://officeapis.public.onecdn.static.microsoft/1/office.js"></script>
 <script src="xlsx-export.js?v=20261120-2"></script>
-<script src="app.js?v=20261120-2"></script>
+<script src="app.js?v=20261120-3"></script>
 </body>
   </html>

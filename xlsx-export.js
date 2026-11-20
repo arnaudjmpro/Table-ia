@@ -170,7 +170,7 @@
         summaries.forEach(function (summary, index) {
             const target = columns.findIndex(column => column.name === summary.targetColumn);
             if (target < 0 || !summary.formula) return;
-            const rowNumber = rows.length + 3 + index;
+            const rowNumber = rows.length + 2 + index;
             // Si le résultat est en A, placer son libellé en B pour garder les deux.
             const labelColumn = target === 0 ? 'B' : 'A';
             if (target === 0 && columns.length === 1) sheetLastColumn = 'B';

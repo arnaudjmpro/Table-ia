@@ -68,6 +68,7 @@ if (isWebConversation) {
     document.body.classList.add("web-conversation");
     conversationPanel.hidden = false;
     sendHint.hidden = false;
+    insertExcelButton.textContent = "📥 TÉLÉCHARGER LE FICHIER EXCEL (.XLSX)";
 }
 
 const isMobileCaptureDevice =
@@ -1410,7 +1411,44 @@ insertExcelButton.addEventListener(
 
         if (!currentTableData) {
             statusText.textContent =
-                "Aucun tableau à insérer.";
+                isWebConversation
+                    ? "Aucun tableau à télécharger."
+                    : "Aucun tableau à insérer.";
+            return;
+        }
+
+        if (isWebConversation) {
+            insertExcelButton.disabled = true;
+            try {
+                if (!window.TableIAXlsx) {
+                    throw new Error("Le module d'export Excel n'a pas été chargé.");
+                }
+                const workbook = window.TableIAXlsx.createWorkbookBlob(
+                    currentTableData,
+                    { coerceExcelValue, normalizeExcelFormula }
+                );
+                const filename = String(currentTableData.title || "TableIA")
+                    .replace(/[\\/:*?"<>|]/g, " ")
+                    .replace(/\s+/g, " ")
+                    .trim()
+                    .slice(0, 80) || "TableIA";
+                const url = URL.createObjectURL(workbook);
+                const download = document.createElement("a");
+                download.href = url;
+                download.download = filename + ".xlsx";
+                document.body.appendChild(download);
+                download.click();
+                download.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+                statusText.textContent =
+                    "✅ Fichier .xlsx téléchargé. Ouvrez-le depuis Téléchargements.";
+            } catch (error) {
+                console.error(error);
+                statusText.textContent = "❌ Export Excel impossible : " +
+                    (error?.message || "erreur inconnue");
+            } finally {
+                insertExcelButton.disabled = false;
+            }
             return;
         }
 
